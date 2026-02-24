@@ -1,5 +1,4 @@
 # Shopify App Configuration
-# Learn more: https://shopify.dev/docs/apps/tools/cli/configuration
 
 name = "Onsite Commission Engine"
 client_id = "2c0c2d3236620126da1b4b8ab6ce01af"
@@ -28,8 +27,4 @@ api_version = "2024-10"
 url = "https://shopify-app-q4bw.onrender.com/proxy"
 subpath = "oce"
 prefix = "apps"
-
-[[extensions]]
-name = "OCE Script Tag"
-type = "theme"
-handle = "oce-script-tag"
+"@ | Set-Content -Path shopify.app.toml -Encoding UTF8
