@@ -10,21 +10,21 @@ scopes = "read_all_orders,read_customers,read_products,read_script_tags,write_sc
 
 [auth]
 redirect_urls = [
-  "https://your-app-url.com/auth/callback",
-  "https://your-app-url.com/auth/shopify/callback",
-  "https://your-app-url.com/api/auth/callback"
+  "https://shopify-app-q4bw.onrender.com/auth/callback",
+  "https://shopify-app-q4bw.onrender.com/auth/shopify/callback",
+  "https://shopify-app-q4bw.onrender.com/api/auth/callback"
 ]
 
 [webhooks]
 api_version = "2024-10"
 
   [webhooks.privacy_compliance]
-  customer_deletion_url = "https://your-app-url.com/webhooks/customers/delete"
-  customer_data_request_url = "https://your-app-url.com/webhooks/customers/data-request"
-  shop_deletion_url = "https://your-app-url.com/webhooks/shop/delete"
+  customer_deletion_url = "https://shopify-app-q4bw.onrender.com/webhooks/customers/delete"
+  customer_data_request_url = "https://shopify-app-q4bw.onrender.com/webhooks/customers/data-request"
+  shop_deletion_url = "https://shopify-app-q4bw.onrender.com/webhooks/shop/delete"
 
 [app_proxy]
-url = "https://your-app-url.com/proxy"
+url = "https://shopify-app-q4bw.onrender.com/proxy"
 subpath = "oce"
 prefix = "apps"
 
