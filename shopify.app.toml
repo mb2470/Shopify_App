@@ -1,6 +1,6 @@
 # Shopify App Configuration
 
-name = "Onsite Commission Engine"
+name = "Onsite Affiliate"
 client_id = "2c0c2d3236620126da1b4b8ab6ce01af"
 application_url = "https://shopify-app-q4bw.onrender.com"
 embedded = true
