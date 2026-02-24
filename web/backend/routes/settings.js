@@ -82,27 +82,16 @@ export async function updateSettings(shop, updates) {
 
 /**
  * PUT /api/settings/api-key
- * Update and validate the OCE API key
+ * Update the OCE API key
  */
 export async function updateApiKey(shop, apiKey) {
-  // Validate the key with OCE
-  const oceApi = new OceApiService(apiKey);
-  const validation = await oceApi.validateApiKey();
-
-  if (!validation.valid) {
-    return {
-      success: false,
-      error: "Invalid API key. Please check your key and try again.",
-    };
-  }
-
   await prisma.oceSettings.upsert({
     where: { shop },
     create: { shop, apiKey },
     update: { apiKey },
   });
 
-  return { success: true, message: "API key validated and saved." };
+  return { success: true, message: "API key saved successfully." };
 }
 
 /**
