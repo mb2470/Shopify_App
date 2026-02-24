@@ -27,4 +27,3 @@ api_version = "2024-10"
 url = "https://shopify-app-q4bw.onrender.com/proxy"
 subpath = "oce"
 prefix = "apps"
-"@ | Set-Content -Path shopify.app.toml -Encoding UTF8
