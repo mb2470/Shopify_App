@@ -1,0 +1,88 @@
+// Prisma schema for OCE Shopify App
+// Stores merchant settings, API keys, and attribution config
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Shopify session storage (required by @shopify/shopify-app-remix)
+model Session {
+  id            String   @id
+  shop          String
+  state         String
+  isOnline      Boolean  @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+
+  @@index([shop])
+}
+
+// Merchant OCE configuration
+model OceSettings {
+  id                  String   @id @default(cuid())
+  shop                String   @unique
+  apiKey              String   @default("")
+  sdkEnabled          Boolean  @default(true)
+  webhookEnabled      Boolean  @default(true)
+
+  // Attribution settings
+  attributionModel    String   @default("last-touch") // last-touch | first-touch
+  attributionWindow   Int      @default(30) // days
+  commissionRate      Float    @default(10.0) // percentage
+
+  // Qualifying events
+  trackImpressions    Boolean  @default(true)
+  trackClicks         Boolean  @default(true)
+  trackWatchProgress  Boolean  @default(true)
+  minWatchPercent     Int      @default(25) // minimum watch % to qualify
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([shop])
+}
+
+// Log of orders sent to OCE API
+model OrderSync {
+  id            String   @id @default(cuid())
+  shop          String
+  shopifyOrderId String
+  oceOrderId    String?
+  exposureIds   String?  // JSON array of exposure IDs
+  status        String   @default("pending") // pending | sent | failed | attributed
+  errorMessage  String?
+  totalAmount   Float?
+  commission    Float?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([shop, shopifyOrderId])
+  @@index([shop])
+  @@index([status])
+}
+
+// Registered video assets
+model VideoAsset {
+  id          String   @id @default(cuid())
+  shop        String
+  assetId     String   // OCE asset ID
+  title       String?
+  creatorName String?
+  creatorId   String?
+  videoUrl    String?
+  skus        String?  // JSON array of associated SKUs
+  platform    String?  // videowise | tolstoy | firework | youtube | vimeo | custom
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([shop, assetId])
+  @@index([shop])
+}

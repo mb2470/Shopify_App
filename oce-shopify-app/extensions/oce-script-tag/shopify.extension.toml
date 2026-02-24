@@ -1,0 +1,11 @@
+api_version = "2024-10"
+
+[[extensions]]
+name = "OCE Tracking SDK"
+type = "theme"
+handle = "oce-tracking-sdk"
+
+  [[extensions.blocks]]
+  name = "OCE Script"
+  type = "oce-sdk"
+  target = "head"

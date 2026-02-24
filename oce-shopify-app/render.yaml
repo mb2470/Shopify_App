@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: oce-shopify-app
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx prisma generate && npx prisma db push && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        value: file:./data/oce.db
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: SHOPIFY_APP_URL
+        sync: false
+      - key: PORT
+        value: 3000
+    disk:
+      name: oce-data
+      mountPath: /opt/render/project/src/prisma/data
+      sizeGB: 1
