@@ -29,9 +29,6 @@ url = "https://shopify-app-q4bw.onrender.com/proxy"
 subpath = "oce"
 prefix = "apps"
 
-[pos]
-embedded = false
-
 [[extensions]]
 name = "OCE Script Tag"
 type = "theme"
