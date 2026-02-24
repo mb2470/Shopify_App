@@ -4,6 +4,7 @@
 name = "Onsite Commission Engine"
 client_id = "2c0c2d3236620126da1b4b8ab6ce01af"
 application_url = "https://shopify-app-q4bw.onrender.com"
+embedded = true
 
 [access_scopes]
 scopes = "read_all_orders,read_customers,read_products,read_script_tags,write_script_tags"
