@@ -1,53 +1,44 @@
 {% comment %}
   OCE SDK Script Tag — Shopify Theme App Extension
   Injects the Onsite Commission Engine tracking SDK into the storefront.
-  Auto-detects Videowise, Tolstoy, Firework, YouTube, Vimeo, and HTML5 players.
-  Handles session persistence, event deduplication, and cross-domain attribution.
+  API key is synced automatically from the app dashboard via metafields.
 {% endcomment %}
 
-{% assign oce_key = block.settings.api_key | default: app.metafields.oce.api_key %}
-
-{% if oce_key != blank %}
+{% if app.metafields.oce.api_key != blank %}
   <!-- Onsite Commission Engine SDK -->
   <script
     src="https://app.onsiteaffiliate.com/sdk/oce.min.js"
-    data-api-key="{{ oce_key }}"
+    data-api-key="{{ app.metafields.oce.api_key }}"
     defer
   ></script>
 {% endif %}
 
+<!-- Exposure event listener — always active when embed is enabled -->
 <script>
-  // Store exposure IDs in cart attributes for order attribution
   (function() {
     'use strict';
 
-    // Listen for OCE exposure events
     window.addEventListener('oce:exposure', function(event) {
       var exposureId = event.detail && event.detail.exposure_id;
       if (!exposureId) return;
 
-      // Get existing exposure IDs from session
       var stored = [];
       try {
         var raw = sessionStorage.getItem('_oce_exposure_ids');
         if (raw) stored = JSON.parse(raw);
       } catch(e) {}
 
-      // Add new ID if not already tracked
       if (stored.indexOf(exposureId) === -1) {
         stored.push(exposureId);
-        // Keep only last 50 exposure IDs
         if (stored.length > 50) stored = stored.slice(-50);
         try {
           sessionStorage.setItem('_oce_exposure_ids', JSON.stringify(stored));
         } catch(e) {}
       }
 
-      // Update cart attributes with exposure IDs
       updateCartAttributes(stored);
     });
 
-    // Sync exposure IDs to Shopify cart attributes
     function updateCartAttributes(exposureIds) {
       fetch('/cart/update.js', {
         method: 'POST',
@@ -63,26 +54,17 @@
       });
     }
 
-    // Get or create a persistent session ID
     function getSessionId() {
       var key = '_oce_session_id';
       var sessionId = null;
-
-      try {
-        sessionId = localStorage.getItem(key);
-      } catch(e) {}
-
+      try { sessionId = localStorage.getItem(key); } catch(e) {}
       if (!sessionId) {
         sessionId = 'oce_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        try {
-          localStorage.setItem(key, sessionId);
-        } catch(e) {}
+        try { localStorage.setItem(key, sessionId); } catch(e) {}
       }
-
       return sessionId;
     }
 
-    // On page load, ensure any existing exposures are in cart
     document.addEventListener('DOMContentLoaded', function() {
       try {
         var raw = sessionStorage.getItem('_oce_exposure_ids');
@@ -99,13 +81,6 @@
 {
   "name": "OCE Tracking SDK",
   "target": "head",
-  "settings": [
-    {
-      "type": "text",
-      "id": "api_key",
-      "label": "OCE API Key",
-      "info": "Paste your API key from app.onsiteaffiliate.com/settings/api-keys"
-    }
-  ]
+  "settings": []
 }
 {% endschema %}
