@@ -410,6 +410,7 @@ function getAdminHTML(shop, host) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="shopify-api-key" content="${SHOPIFY_API_KEY}" />
   <title>Onsite Commission Engine</title>
   <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
   <style>
@@ -537,6 +538,7 @@ function getAdminHTML(shop, host) {
 <script>
 const S="${shop}",B="";
 let st={sdk:true,wh:true,key:false};
+console.log("[init] shop:",S,"shopify obj:",typeof window.shopify,"idToken:",typeof (window.shopify&&window.shopify.idToken));
 
 async function api(m,p,b){
   const headers={"Content-Type":"application/json"};
