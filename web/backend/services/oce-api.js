@@ -1,10 +1,10 @@
 /**
  * OCE API Service
  * Handles all communication with the Onsite Commission Engine REST API
- * Base URL: https://app.onsiteaffiliate.com
+ * Base URL: https://mqhtzepjrudposuedqbu.supabase.co/functions/v1
  */
 
-const OCE_BASE_URL = "https://app.onsiteaffiliate.com";
+const OCE_BASE_URL = "https://mqhtzepjrudposuedqbu.supabase.co/functions/v1";
 
 export class OceApiService {
   constructor(apiKey) {
@@ -38,99 +38,123 @@ export class OceApiService {
     return response.json();
   }
 
-  // ─── Exposure Events ────────────────────────────────────────────
+  // ─── Exposures ──────────────────────────────────────────────────
 
   /**
-   * Send an exposure event to OCE
-   * Called when a user watches creator video content
+   * Generate a server-side exposure ID
+   * POST /exposures-create
    */
-  async sendExposureEvent({ exposureId, assetId, sku, sessionId, events }) {
-    return this.request("POST", "/api/v1/events-exposure", {
-      exposure_id: exposureId,
+  async createExposure({ assetId, sessionId, sku, creatorExternalId }) {
+    return this.request("POST", "/exposures-create", {
       asset_id: assetId,
-      sku,
       session_id: sessionId,
-      events, // array of { type, timestamp, metadata }
+      sku,
+      creator_external_id: creatorExternalId,
     });
+  }
+
+  // ─── Events ─────────────────────────────────────────────────────
+
+  /**
+   * Record video engagement events
+   * POST /events-exposure
+   */
+  async sendExposureEvents(events) {
+    return this.request("POST", "/events-exposure", { events });
   }
 
   // ─── Orders ─────────────────────────────────────────────────────
 
   /**
-   * Send order data for attribution
-   * Called via Shopify order webhook
+   * Submit order for attribution
+   * POST /orders
    */
-  async sendOrder({ orderId, exposureIds, lineItems, totalAmount, currency, customerEmail }) {
-    return this.request("POST", "/api/v1/orders", {
+  async sendOrder({ orderId, ts, exposureIds, sessionId, lineItems, currency }) {
+    return this.request("POST", "/orders", {
       order_id: orderId,
+      ts,
       exposure_ids: exposureIds,
+      session_id: sessionId,
       line_items: lineItems.map((item) => ({
         sku: item.sku,
         product_id: item.productId,
         variant_id: item.variantId,
-        title: item.title,
-        quantity: item.quantity,
+        qty: item.quantity,
         price: item.price,
+        revenue: item.revenue ?? item.price * item.quantity,
       })),
-      total_amount: totalAmount,
       currency,
-      customer_email: customerEmail,
     });
   }
 
-  // ─── Video Assets ───────────────────────────────────────────────
+  // ─── Assets ─────────────────────────────────────────────────────
 
   /**
-   * Register a video asset with OCE
+   * Register or update video assets
+   * POST /assets-upsert
    */
-  async registerVideoAsset({ title, creatorId, videoUrl, skus, platform }) {
-    return this.request("POST", "/api/v1/assets", {
-      title,
-      creator_id: creatorId,
-      video_url: videoUrl,
-      skus,
-      platform,
-    });
+  async upsertAssets(assets) {
+    return this.request("POST", "/assets-upsert", { assets });
+  }
+
+  // ─── Creators ───────────────────────────────────────────────────
+
+  /**
+   * Register or update creators
+   * POST /creators-upsert
+   */
+  async upsertCreators(creators) {
+    return this.request("POST", "/creators-upsert", { creators });
+  }
+
+  // ─── Attributions ───────────────────────────────────────────────
+
+  /**
+   * Recompute attributions for a date range
+   * POST /recompute-attributions
+   */
+  async recomputeAttributions({ startDate, endDate, orderIds }) {
+    const body = { start_date: startDate, end_date: endDate };
+    if (orderIds) body.order_ids = orderIds;
+    return this.request("POST", "/recompute-attributions", body);
+  }
+
+  // ─── Management API ─────────────────────────────────────────────
+
+  /**
+   * Call the management API (control plane)
+   * POST /manage
+   */
+  async manage(action, params = {}, { dryRun = false, idempotencyKey } = {}) {
+    const body = { action, params };
+    if (dryRun) body.dry_run = true;
+    if (idempotencyKey) body.idempotency_key = idempotencyKey;
+    return this.request("POST", "/manage", body);
   }
 
   /**
-   * List registered video assets
+   * Get dashboard stats via management API
    */
-  async listVideoAssets(page = 1, limit = 50) {
-    return this.request("GET", `/api/v1/assets?page=${page}&limit=${limit}`);
-  }
-
-  // ─── Attribution & Reporting ────────────────────────────────────
-
-  /**
-   * Get attribution report
-   */
-  async getAttributionReport({ startDate, endDate, creatorId }) {
-    const params = new URLSearchParams();
-    if (startDate) params.set("start_date", startDate);
-    if (endDate) params.set("end_date", endDate);
-    if (creatorId) params.set("creator_id", creatorId);
-    return this.request("GET", `/api/v1/reports/attribution?${params}`);
+  async getStats(periodDays = 30) {
+    return this.manage("stats.overview", { period_days: periodDays });
   }
 
   /**
-   * Get commission summary
+   * Get attribution settings via management API
    */
-  async getCommissionSummary({ startDate, endDate }) {
-    const params = new URLSearchParams();
-    if (startDate) params.set("start_date", startDate);
-    if (endDate) params.set("end_date", endDate);
-    return this.request("GET", `/api/v1/reports/commissions?${params}`);
+  async getSettings() {
+    return this.manage("settings.get");
   }
 
-  // ─── Settings ───────────────────────────────────────────────────
+  // ─── Validation ─────────────────────────────────────────────────
 
   /**
-   * Validate API key by making a test request
+   * Validate API key by requesting dashboard stats
+   * If the key is invalid, /manage returns 401
    */
   async validateApiKey() {
     try {
-      await this.request("GET", "/api/v1/account");
+      await this.manage("stats.overview", { period_days: 1 });
       return { valid: true };
     } catch (error) {
       return { valid: false, error: error.message };

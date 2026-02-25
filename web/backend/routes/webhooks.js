@@ -53,44 +53,50 @@ export async function handleOrderCreated(shop, orderData) {
   // 4. Extract exposure IDs from order note attributes or cart attributes
   const exposureIds = extractExposureIds(orderData);
 
-  // 5. Build line items
+  // 5. Extract session ID from note attributes
+  const sessionAttr = (orderData.note_attributes || []).find(
+    (a) => a.name === "_oce_session_id" || a.name === "oce_session_id"
+  );
+  const sessionId = sessionAttr?.value || undefined;
+
+  // 6. Build line items (OCE API expects qty, price, revenue)
   const lineItems = (orderData.line_items || []).map((item) => ({
     sku: item.sku || "",
     productId: String(item.product_id),
     variantId: String(item.variant_id),
-    title: item.title,
     quantity: item.quantity,
     price: parseFloat(item.price),
+    revenue: parseFloat(item.price) * item.quantity,
   }));
 
-  // 6. Send to OCE API
+  // 7. Send to OCE API
   const oceApi = new OceApiService(settings.apiKey);
 
   try {
     const result = await oceApi.sendOrder({
       orderId: shopifyOrderId,
+      ts: orderData.created_at || new Date().toISOString(),
       exposureIds,
+      sessionId,
       lineItems,
-      totalAmount: parseFloat(orderData.total_price),
       currency: orderData.currency,
-      customerEmail: orderData.email || orderData.customer?.email,
     });
 
-    // 7. Update sync record with success
+    // 8. Update sync record with success
     await prisma.orderSync.update({
       where: { id: syncRecord.id },
       data: {
         status: "sent",
-        oceOrderId: result?.order_id || null,
+        oceOrderId: result?.internal_id || result?.order_id || null,
         exposureIds: JSON.stringify(exposureIds),
-        commission: result?.commission || null,
+        commission: result?.attribution?.total_commission || null,
       },
     });
 
     console.log(`[OCE] Order ${shopifyOrderId} sent successfully`);
     return { status: "sent", oceOrderId: result?.order_id };
   } catch (error) {
-    // 8. Update sync record with failure
+    // 9. Update sync record with failure
     await prisma.orderSync.update({
       where: { id: syncRecord.id },
       data: {

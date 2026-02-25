@@ -154,7 +154,7 @@ app.get("/api/auth/callback", (req, res) => res.redirect(`/auth/callback?${new U
 // Used by the authenticate middleware on first contact with a shop.
 
 async function doTokenExchange(shop, sessionToken) {
-  console.log("[OCE] Token exchange for", shop);
+  console.log("[OCE] Token exchange for", shop, "client_id:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING");
   try {
     const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: "POST",
@@ -169,8 +169,18 @@ async function doTokenExchange(shop, sessionToken) {
       }),
     });
 
-    const data = await response.json();
-    console.log("[OCE] Token exchange response status:", response.status);
+    console.log("[OCE] Token exchange response status:", response.status, "content-type:", response.headers.get("content-type"));
+
+    // Read as text first to avoid JSON parse crash on HTML error pages
+    const responseText = await response.text();
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error("[OCE] Token exchange returned non-JSON (status " + response.status + "):", responseText.substring(0, 500));
+      return { success: false, error: "Shopify returned HTTP " + response.status + " (non-JSON). App may need to be reinstalled on this store." };
+    }
 
     if (!response.ok || !data.access_token) {
       console.error("[OCE] Token exchange failed:", JSON.stringify(data));
@@ -549,6 +559,20 @@ function getAdminHTML(shop, host) {
 const S="${shop}",B="";
 let st={sdk:true,wh:true,key:false};
 console.log("[init] shop:",S,"shopify obj:",typeof window.shopify,"idToken:",typeof (window.shopify&&window.shopify.idToken));
+
+// ── Diagnostic: verify what App Bridge actually sees ──
+(function(){
+  var meta=document.querySelector('meta[name="shopify-api-key"]');
+  console.log("[diag] meta tag value:",meta?JSON.stringify(meta.content):"META TAG MISSING");
+  console.log("[diag] iframe origin:",window.location.origin);
+  console.log("[diag] iframe URL:",window.location.href);
+  console.log("[diag] parent===self (not embedded):",window.parent===window);
+  if(window.shopify){
+    console.log("[diag] shopify object keys:",Object.keys(window.shopify));
+    console.log("[diag] shopify.config:",JSON.stringify(window.shopify.config||"none"));
+    console.log("[diag] shopify.environment:",JSON.stringify(window.shopify.environment||"none"));
+  }
+})();
 
 async function getSessionToken(attempt){
   attempt=attempt||1;
