@@ -322,8 +322,8 @@ function getAdminHTML(shop, host) {
     <div id="kd" style="margin-top:12px;background:#f6f6f7;border-radius:8px;padding:12px;display:none">✅ <span id="mk"></span></div>
     <div id="kf" style="margin-top:12px"><div class="form-g"><label>OCE API Key</label>
       <input type="password" id="ki" placeholder="oce_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
-      <p class="help">Paste your API key. It will be validated before saving.</p></div>
-      <button class="btn btn-p" onclick="saveKey()" id="skb">Validate & Save Key</button></div>
+      <p class="help">Paste your API key from the OCE dashboard.</p></div>
+      <button class="btn btn-p" onclick="saveKey()" id="skb">Save Key</button></div>
   </div>
 
   <div class="card" id="qs"><h2>Quick Start</h2><hr>
@@ -411,10 +411,10 @@ async function load(){
 
 async function saveKey(){
   const k=document.getElementById("ki").value.trim();if(!k)return;
-  const b=document.getElementById("skb");b.disabled=true;b.textContent="Validating...";
+  const b=document.getElementById("skb");b.disabled=true;b.textContent="Saving...";
   const r=await api("PUT","/api/settings/api-key",{apiKey:k});
-  b.disabled=false;b.textContent="Validate & Save Key";
-  if(r.success){msg("success","API key validated and saved!");load()}else msg("error",r.error||"Invalid API key");
+  b.disabled=false;b.textContent="Save Key";
+  if(r.success){msg("success","API key saved!");load()}else msg("error",r.error||"Failed to save API key");
 }
 
 async function saveSets(){

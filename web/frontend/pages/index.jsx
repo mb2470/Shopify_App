@@ -262,7 +262,7 @@ export default function OceDashboard() {
                   type="password"
                   placeholder="oce_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                   autoComplete="off"
-                  helpText="Paste your API key from the OCE dashboard. It will be validated before saving."
+                  helpText="Paste your API key from the OCE dashboard."
                 />
                 <InlineStack gap="200">
                   <Button
@@ -271,7 +271,7 @@ export default function OceDashboard() {
                     loading={isLoading}
                     disabled={!apiKey.trim()}
                   >
-                    Validate & Save Key
+                    Save Key
                   </Button>
                 </InlineStack>
               </BlockStack>
