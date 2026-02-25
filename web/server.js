@@ -142,6 +142,75 @@ app.get("/auth/callback", async (req, res) => {
 app.get("/auth/shopify/callback", (req, res) => res.redirect(`/auth/callback?${new URLSearchParams(req.query)}`));
 app.get("/api/auth/callback", (req, res) => res.redirect(`/auth/callback?${new URLSearchParams(req.query)}`));
 
+// ─── Token Exchange (App Bridge v4 embedded auth) ────────────────
+// Instead of OAuth redirects (which break in iframes), App Bridge v4
+// provides a session token via shopify.idToken(). We exchange it for
+// an offline access token server-side — no redirect needed at all.
+
+app.post("/auth/token-exchange", express.json(), async (req, res) => {
+  const shop = req.query.shop || req.body.shop;
+  const sessionToken = req.body.sessionToken;
+
+  if (!shop || !sessionToken) {
+    return res.status(400).json({ error: "Missing shop or sessionToken" });
+  }
+
+  console.log("[OCE] Token exchange for", shop);
+
+  try {
+    const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: SHOPIFY_API_KEY,
+        client_secret: SHOPIFY_API_SECRET,
+        grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
+        subject_token: sessionToken,
+        subject_token_type: "urn:ietf:params:oauth:token-type:id-token",
+        requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
+      }),
+    });
+
+    const data = await response.json();
+    console.log("[OCE] Token exchange response status:", response.status);
+
+    if (!response.ok || !data.access_token) {
+      console.error("[OCE] Token exchange failed:", JSON.stringify(data));
+      return res.status(400).json({ error: data.error_description || data.error || "Token exchange failed" });
+    }
+
+    // Store the session
+    await prisma.session.upsert({
+      where: { id: `offline_${shop}` },
+      create: {
+        id: `offline_${shop}`,
+        shop,
+        state: "",
+        isOnline: false,
+        accessToken: data.access_token,
+        scope: data.scope || SCOPES,
+      },
+      update: { accessToken: data.access_token, scope: data.scope || SCOPES },
+    });
+
+    // Ensure settings row exists
+    await prisma.oceSettings.upsert({
+      where: { shop },
+      create: { shop },
+      update: {},
+    });
+
+    // Register webhooks with the new token
+    await registerWebhooks(shop, data.access_token);
+
+    console.log("[OCE] Token exchange complete for", shop, "— session stored");
+    return res.json({ success: true });
+  } catch (err) {
+    console.error("[OCE] Token exchange error:", err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Webhook Registration ─────────────────────────────────────────
 
 async function registerWebhooks(shop, accessToken) {
@@ -299,14 +368,45 @@ app.get("/", async (req, res) => {
     try {
       const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
       if (!session || !session.accessToken) {
-        console.log("[OCE] No session for", shop, "— App Bridge v4 OAuth redirect");
-        // We're inside Shopify's admin iframe. Use App Bridge v4 (CDN) which
-        // intercepts window.open(_top) to break out of the iframe for OAuth.
-        const authUrl = `${SHOPIFY_APP_URL}/auth?shop=${encodeURIComponent(shop)}`;
+        console.log("[OCE] No session for", shop, "— serving token exchange page");
+        // We're inside Shopify's admin iframe. Instead of redirecting (blocked by
+        // X-Frame-Options / cross-origin), use App Bridge v4 token exchange:
+        // 1. Get a session token from shopify.idToken()
+        // 2. POST it to /auth/token-exchange
+        // 3. Server exchanges it for an offline access token — no redirect needed
         return res.send(`<!DOCTYPE html><html><head>
           <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-          <script>window.open(${JSON.stringify(authUrl)}, '_top');</script>
-          </head><body>Redirecting to authorize…</body></html>`);
+          <script>
+            (async function() {
+              var el = document.getElementById('msg');
+              try {
+                if (!window.shopify || !window.shopify.idToken) {
+                  if(el) el.textContent = 'App Bridge not available. Please open this app from your Shopify admin.';
+                  return;
+                }
+                if(el) el.textContent = 'Getting authorization token…';
+                var token = await shopify.idToken();
+                if(el) el.textContent = 'Exchanging token…';
+                var resp = await fetch('/auth/token-exchange?shop=' + encodeURIComponent(${JSON.stringify(shop)}), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ sessionToken: token })
+                });
+                var data = await resp.json();
+                if (data.success) {
+                  if(el) el.textContent = 'Authorized! Loading app…';
+                  window.location.reload();
+                } else {
+                  if(el) el.textContent = 'Authorization failed: ' + (data.error || 'Unknown error');
+                }
+              } catch (err) {
+                if(el) el.textContent = 'Error: ' + err.message;
+                console.error('Token exchange error:', err);
+              }
+            })();
+          </script>
+          </head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+          <p id="msg">Authorizing…</p></body></html>`);
       }
       console.log("[OCE] Session found for", shop, "— serving admin UI");
     } catch (err) {
