@@ -291,8 +291,24 @@ app.get("/api/debug/metafields", authenticate, async (req, res) => {
 
 // ─── Admin UI ─────────────────────────────────────────────────────
 
-app.get("/", (req, res) => {
+app.get("/", async (req, res) => {
   const { shop, host } = req.query;
+
+  // If shop param present, verify we have a valid session — redirect to OAuth if not
+  if (shop) {
+    try {
+      const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
+      if (!session || !session.accessToken) {
+        console.log("[OCE] No session for", shop, "— redirecting to OAuth");
+        return res.redirect(`/auth?shop=${encodeURIComponent(shop)}`);
+      }
+      console.log("[OCE] Session found for", shop, "— serving admin UI");
+    } catch (err) {
+      console.error("[OCE] Session check error:", err);
+      // Fall through to serve UI anyway — API calls will trigger auth errors
+    }
+  }
+
   res.send(getAdminHTML(shop || "", host || ""));
 });
 
