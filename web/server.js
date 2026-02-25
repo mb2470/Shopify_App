@@ -542,13 +542,22 @@ async function api(m,p,b){
   const headers={"Content-Type":"application/json"};
   try{
     if(window.shopify&&window.shopify.idToken){
-      const t=await shopify.idToken();
+      console.log("[api] getting session token…");
+      var t=await Promise.race([
+        shopify.idToken(),
+        new Promise(function(_,rej){setTimeout(function(){rej(new Error("idToken timeout"))},5000)})
+      ]);
       headers["Authorization"]="Bearer "+t;
+      console.log("[api] got token, length:",t.length);
+    }else{
+      console.log("[api] shopify.idToken not available, using shop param fallback");
     }
-  }catch(e){console.warn("Could not get session token:",e)}
+  }catch(e){console.warn("[api] session token failed:",e.message)}
   const o={method:m,headers:headers};
   if(b)o.body=JSON.stringify(b);
-  return(await fetch(B+p,o)).json();
+  var url=B+p+(p.includes("?")?"&":"?")+"shop="+encodeURIComponent(S);
+  console.log("[api]",m,url);
+  return(await fetch(url,o)).json();
 }
 function msg(t,m){const e=document.getElementById(t==="success"?"sb":"eb");e.textContent=m;e.style.display="block";setTimeout(()=>e.style.display="none",5000)}
 function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return'<span class="badge '+c+'">'+l+"</span>"}
