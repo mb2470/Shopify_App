@@ -333,13 +333,30 @@ async function authenticate(req, res, next) {
         });
       } else {
         console.error("[OCE] Auth: token exchange failed:", result.error);
-        return res.status(401).json({ error: "Token exchange failed: " + result.error });
+        // Redirect to OAuth install flow so the merchant re-authorizes
+        const redirectUri = `${SHOPIFY_APP_URL}/auth/callback`;
+        const installUrl =
+          `https://${shop}/admin/oauth/authorize?` +
+          `client_id=${SHOPIFY_API_KEY}&scope=${SCOPES}` +
+          `&redirect_uri=${encodeURIComponent(redirectUri)}`;
+        return res.status(401).json({
+          error: "Re-authorization required",
+          reauthorize: installUrl,
+        });
       }
     }
 
     if (!session || !session.accessToken) {
       console.warn("[OCE] Auth failed: no session for", shop);
-      return res.status(401).json({ error: "Not authenticated" });
+      const redirectUri = `${SHOPIFY_APP_URL}/auth/callback`;
+      const installUrl =
+        `https://${shop}/admin/oauth/authorize?` +
+        `client_id=${SHOPIFY_API_KEY}&scope=${SCOPES}` +
+        `&redirect_uri=${encodeURIComponent(redirectUri)}`;
+      return res.status(401).json({
+        error: "Not authenticated",
+        reauthorize: installUrl,
+      });
     }
 
     req.shop = shop;
@@ -614,6 +631,11 @@ async function api(m,p,b){
   var resp=await fetch(url,o);
   if(!resp.ok){
     var err=await resp.json().catch(function(){return{error:"HTTP "+resp.status}});
+    if(err.reauthorize){
+      console.log("[api] redirecting to OAuth:",err.reauthorize);
+      window.open(err.reauthorize,"_top");
+      throw new Error("Redirecting to authorization...");
+    }
     throw new Error(err.error||err.detail||"HTTP "+resp.status);
   }
   return resp.json();
