@@ -540,26 +540,49 @@ const S="${shop}",B="";
 let st={sdk:true,wh:true,key:false};
 console.log("[init] shop:",S,"shopify obj:",typeof window.shopify,"idToken:",typeof (window.shopify&&window.shopify.idToken));
 
-async function api(m,p,b){
-  const headers={"Content-Type":"application/json"};
+async function getSessionToken(attempt){
+  attempt=attempt||1;
+  if(!window.shopify||!window.shopify.idToken){
+    console.warn("[auth] App Bridge not available");
+    return null;
+  }
   try{
-    if(window.shopify&&window.shopify.idToken){
-      console.log("[api] getting session token…");
-      var t=await Promise.race([
-        shopify.idToken(),
-        new Promise(function(_,rej){setTimeout(function(){rej(new Error("idToken timeout"))},5000)})
-      ]);
-      headers["Authorization"]="Bearer "+t;
-      console.log("[api] got token, length:",t.length);
-    }else{
-      console.log("[api] shopify.idToken not available, using shop param fallback");
+    var t=await Promise.race([
+      shopify.idToken(),
+      new Promise(function(_,rej){setTimeout(function(){rej(new Error("timeout"))},3000)})
+    ]);
+    console.log("[auth] got token on attempt",attempt,"length:",t.length);
+    return t;
+  }catch(e){
+    if(attempt<4){
+      var delay=attempt*500;
+      console.log("[auth] attempt",attempt,"failed ("+e.message+"), retrying in",delay+"ms...");
+      await new Promise(function(r){setTimeout(r,delay)});
+      return getSessionToken(attempt+1);
     }
-  }catch(e){console.warn("[api] session token failed:",e.message)}
-  const o={method:m,headers:headers};
+    console.error("[auth] all attempts failed:",e.message);
+    return null;
+  }
+}
+
+async function api(m,p,b){
+  var t=await getSessionToken();
+  var headers={"Content-Type":"application/json"};
+  if(t){
+    headers["Authorization"]="Bearer "+t;
+  }else{
+    console.warn("[api] no session token, request may fail");
+  }
+  var o={method:m,headers:headers};
   if(b)o.body=JSON.stringify(b);
   var url=B+p+(p.includes("?")?"&":"?")+"shop="+encodeURIComponent(S);
-  console.log("[api]",m,url);
-  return(await fetch(url,o)).json();
+  console.log("[api]",m,url,"auth:",!!t);
+  var resp=await fetch(url,o);
+  if(!resp.ok){
+    var err=await resp.json().catch(function(){return{error:"HTTP "+resp.status}});
+    throw new Error(err.error||err.detail||"HTTP "+resp.status);
+  }
+  return resp.json();
 }
 function msg(t,m){const e=document.getElementById(t==="success"?"sb":"eb");e.textContent=m;e.style.display="block";setTimeout(()=>e.style.display="none",5000)}
 function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return'<span class="badge '+c+'">'+l+"</span>"}
@@ -622,7 +645,23 @@ function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on"
 function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none"}
 function tWh(){st.wh=!st.wh;tog("wt",st.wh)}
 
-load();
+// Wait for App Bridge iframe handshake before first API call
+if(window.shopify&&window.shopify.idToken){
+  console.log("[init] waiting for App Bridge readiness...");
+  Promise.race([
+    shopify.idToken(),
+    new Promise(function(r){setTimeout(r,2000)})
+  ]).then(function(t){
+    console.log("[init] App Bridge",t?"ready":"warm-up timeout",", loading with retry...");
+    load();
+  }).catch(function(){
+    console.log("[init] initial idToken error, loading with retry...");
+    load();
+  });
+}else{
+  console.log("[init] no App Bridge, loading immediately");
+  load();
+}
 </script>
 </body></html>`;
 }
