@@ -299,22 +299,13 @@ app.get("/", async (req, res) => {
     try {
       const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
       if (!session || !session.accessToken) {
-        console.log("[OCE] No session for", shop, "— App Bridge OAuth redirect");
-        // We're inside Shopify's admin iframe. Can't use res.redirect() (X-Frame-Options)
-        // or window.top.location (cross-origin SecurityError). Must use Shopify App Bridge
-        // Redirect action which has permission to navigate the parent frame.
+        console.log("[OCE] No session for", shop, "— App Bridge v4 OAuth redirect");
+        // We're inside Shopify's admin iframe. Use App Bridge v4 (CDN) which
+        // intercepts window.open(_top) to break out of the iframe for OAuth.
         const authUrl = `${SHOPIFY_APP_URL}/auth?shop=${encodeURIComponent(shop)}`;
         return res.send(`<!DOCTYPE html><html><head>
-          <script src="https://cdn.shopify.com/shopifycloud/app-bridge@3/app-bridge.js"></script>
-          <script>
-            var AppBridge = window['app-bridge'];
-            var app = AppBridge.default({
-              apiKey: ${JSON.stringify(SHOPIFY_API_KEY)},
-              host: ${JSON.stringify(host || "")},
-            });
-            var redirect = AppBridge.actions.Redirect.create(app);
-            redirect.dispatch(AppBridge.actions.Redirect.Action.REMOTE, ${JSON.stringify(authUrl)});
-          </script>
+          <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+          <script>window.open(${JSON.stringify(authUrl)}, '_top');</script>
           </head><body>Redirecting to authorize…</body></html>`);
       }
       console.log("[OCE] Session found for", shop, "— serving admin UI");
