@@ -1,7 +1,7 @@
 # Shopify App Configuration
 
 name = "Onsite Affiliate"
-client_id = "2c0c2d3236620126da1b4b8ab6ce01af"
+client_id = "edcdb867c70ac02f5b3118d62d0dd6c0"
 application_url = "https://shopify-app-q4bw.onrender.com"
 embedded = true
 
