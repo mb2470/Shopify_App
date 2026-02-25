@@ -406,8 +406,11 @@ app.get("/api/debug/metafields", authenticate, async (req, res) => {
 
 app.get("/", (req, res) => {
   const { shop, host } = req.query;
-  // Always serve the admin UI. Auth happens on the first API call via
-  // App Bridge session token → authenticate middleware → token exchange.
+  // Set Content-Security-Policy to allow Shopify Admin to embed this app
+  res.setHeader(
+    "Content-Security-Policy",
+    "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
+  );
   res.send(getAdminHTML(shop || "", host || ""));
 });
 
