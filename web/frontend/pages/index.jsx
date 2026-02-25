@@ -63,21 +63,28 @@ export async function action({ request }) {
   const formData = await request.formData();
   const intent = formData.get("intent");
 
-  switch (intent) {
-    case "save-api-key": {
-      const apiKey = formData.get("apiKey");
-      const result = await updateApiKey(shop, apiKey);
-      await syncAppMetafields(shop, session.accessToken);
-      return json(result);
+  try {
+    switch (intent) {
+      case "save-api-key": {
+        const apiKey = formData.get("apiKey");
+        const result = await updateApiKey(shop, apiKey);
+        const syncResult = await syncAppMetafields(shop, session.accessToken);
+        console.log("[OCE] Remix API key sync result:", JSON.stringify(syncResult));
+        return json({ ...result, metafieldSync: syncResult });
+      }
+      case "save-settings": {
+        const updates = JSON.parse(formData.get("settings"));
+        const result = await updateSettings(shop, updates);
+        const syncResult = await syncAppMetafields(shop, session.accessToken);
+        console.log("[OCE] Remix settings sync result:", JSON.stringify(syncResult));
+        return json({ success: true, settings: result, metafieldSync: syncResult });
+      }
+      default:
+        return json({ error: "Unknown action" }, { status: 400 });
     }
-    case "save-settings": {
-      const updates = JSON.parse(formData.get("settings"));
-      const result = await updateSettings(shop, updates);
-      await syncAppMetafields(shop, session.accessToken);
-      return json({ success: true, settings: result });
-    }
-    default:
-      return json({ error: "Unknown action" }, { status: 400 });
+  } catch (err) {
+    console.error("[OCE] Remix action error:", err);
+    return json({ error: err.message }, { status: 500 });
   }
 }
 

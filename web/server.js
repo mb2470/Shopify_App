@@ -19,6 +19,7 @@ import {
   updateApiKey,
   getIntegrationStatus,
   syncAppMetafields,
+  getAppMetafields,
 } from "./backend/routes/settings.js";
 
 const prisma = new PrismaClient();
@@ -37,7 +38,7 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL;
 const SCOPES =
-  "read_all_orders,read_customers,read_products,read_script_tags,write_script_tags";
+  "read_orders,write_orders,read_customers,read_products,read_script_tags,write_script_tags";
 
 function verifyHmac(query) {
   const { hmac, ...rest } = query;
@@ -208,36 +209,84 @@ app.post("/webhooks/shop/delete", (req, res) => res.status(200).send("OK"));
 
 async function authenticate(req, res, next) {
   const shop = req.query.shop || req.headers["x-shop-domain"];
-  if (!shop) return res.status(401).json({ error: "Missing shop" });
-  const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
-  if (!session) return res.status(401).json({ error: "Not authenticated" });
-  req.shop = shop;
-  req.session = session;
-  next();
+  if (!shop) {
+    console.warn("[OCE] Auth failed: missing shop param for", req.method, req.path);
+    return res.status(401).json({ error: "Missing shop" });
+  }
+  try {
+    const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
+    if (!session) {
+      console.warn("[OCE] Auth failed: no session for", shop);
+      return res.status(401).json({ error: "Not authenticated" });
+    }
+    req.shop = shop;
+    req.session = session;
+    next();
+  } catch (err) {
+    console.error("[OCE] Auth middleware error:", err);
+    res.status(500).json({ error: "Authentication error", detail: err.message });
+  }
 }
 
 // ─── API Routes ───────────────────────────────────────────────────
 
 app.get("/api/settings", authenticate, async (req, res) => {
-  res.json(await getSettings(req.shop));
+  try {
+    res.json(await getSettings(req.shop));
+  } catch (err) {
+    console.error("[OCE] GET /api/settings error:", err);
+    res.status(500).json({ error: "Failed to load settings", detail: err.message });
+  }
 });
 
 app.put("/api/settings", authenticate, async (req, res) => {
-  const settings = await updateSettings(req.shop, req.body);
-  // Sync to Shopify app metafields so the Liquid theme extension can read them
-  await syncAppMetafields(req.shop, req.session.accessToken);
-  res.json({ success: true, settings });
+  try {
+    console.log("[OCE] PUT /api/settings for", req.shop);
+    const settings = await updateSettings(req.shop, req.body);
+    // Sync to Shopify app metafields so the Liquid theme extension can read them
+    const syncResult = await syncAppMetafields(req.shop, req.session.accessToken);
+    console.log("[OCE] Settings sync result:", JSON.stringify(syncResult));
+    res.json({ success: true, settings, metafieldSync: syncResult });
+  } catch (err) {
+    console.error("[OCE] PUT /api/settings error:", err);
+    res.status(500).json({ error: "Failed to save settings", detail: err.message });
+  }
 });
 
 app.put("/api/settings/api-key", authenticate, async (req, res) => {
-  const result = await updateApiKey(req.shop, req.body.apiKey);
-  // Sync to Shopify app metafields so the Liquid theme extension can read them
-  await syncAppMetafields(req.shop, req.session.accessToken);
-  res.json(result);
+  try {
+    console.log("[OCE] PUT /api/settings/api-key for", req.shop, "key length:", (req.body.apiKey || "").length);
+    const result = await updateApiKey(req.shop, req.body.apiKey);
+    // Sync to Shopify app metafields so the Liquid theme extension can read them
+    const syncResult = await syncAppMetafields(req.shop, req.session.accessToken);
+    console.log("[OCE] API key sync result:", JSON.stringify(syncResult));
+    res.json({ ...result, metafieldSync: syncResult });
+  } catch (err) {
+    console.error("[OCE] PUT /api/settings/api-key error:", err);
+    res.status(500).json({ error: "Failed to save API key", detail: err.message });
+  }
 });
 
 app.get("/api/settings/status", authenticate, async (req, res) => {
-  res.json(await getIntegrationStatus(req.shop));
+  try {
+    res.json(await getIntegrationStatus(req.shop));
+  } catch (err) {
+    console.error("[OCE] GET /api/settings/status error:", err);
+    res.status(500).json({ error: "Failed to load status", detail: err.message });
+  }
+});
+
+// ─── Debug / Diagnostic Endpoint ──────────────────────────────────
+
+app.get("/api/debug/metafields", authenticate, async (req, res) => {
+  try {
+    console.log("[OCE] Debug metafields for", req.shop);
+    const result = await getAppMetafields(req.shop, req.session.accessToken);
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] Debug metafields error:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ─── Admin UI ─────────────────────────────────────────────────────
@@ -412,9 +461,22 @@ async function load(){
 async function saveKey(){
   const k=document.getElementById("ki").value.trim();if(!k)return;
   const b=document.getElementById("skb");b.disabled=true;b.textContent="Saving...";
-  const r=await api("PUT","/api/settings/api-key",{apiKey:k});
-  b.disabled=false;b.textContent="Save Key";
-  if(r.success){msg("success","API key saved!");load()}else msg("error",r.error||"Failed to save API key");
+  try{
+    const r=await api("PUT","/api/settings/api-key",{apiKey:k});
+    b.disabled=false;b.textContent="Save Key";
+    console.log("Save response:",JSON.stringify(r));
+    if(r.success){
+      const syncOk=r.metafieldSync&&r.metafieldSync.success;
+      msg("success","API key saved!"+(syncOk?" Metafields synced to storefront.":" (Warning: metafield sync "+JSON.stringify(r.metafieldSync)+")"));
+      load();
+    }else{
+      msg("error",r.error||r.detail||"Failed to save API key");
+    }
+  }catch(e){
+    b.disabled=false;b.textContent="Save Key";
+    msg("error","Network error: "+e.message);
+    console.error("saveKey error:",e);
+  }
 }
 
 async function saveSets(){
