@@ -1,0 +1,209 @@
+{% comment %}
+  OCE Test Video Player
+  Drop this block into any section on your dev store to test OCE tracking.
+  Uses a public domain sample video by default — override via block settings.
+{% endcomment %}
+
+{% assign asset_id  = block.settings.asset_id  | default: "test-asset-001" %}
+{% assign sku       = block.settings.sku        | default: "TEST-SKU" %}
+{% assign video_url = block.settings.video_url  | default: "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" %}
+{% assign poster    = block.settings.poster_url | default: "" %}
+
+<div
+  id="oce-test-player-{{ block.id }}"
+  class="oce-test-player"
+  style="
+    max-width: {{ block.settings.max_width | default: 720 }}px;
+    margin: 2rem auto;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  "
+>
+  <!-- Video -->
+  <video
+    id="oce-video-{{ block.id }}"
+    data-oce-asset-id="{{ asset_id }}"
+    data-oce-sku="{{ sku }}"
+    width="100%"
+    controls
+    playsinline
+    {% if poster != blank %}poster="{{ poster }}"{% endif %}
+    style="display:block; border-radius:8px; background:#000;"
+  >
+    <source src="{{ video_url }}" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
+
+  <!-- Debug Panel (dev only) -->
+  {% if block.settings.show_debug %}
+    <details open style="margin-top:1rem; border:1px solid #ccc; border-radius:8px; padding:1rem; background:#fafafa;">
+      <summary style="font-weight:600; cursor:pointer;">OCE Debug Panel</summary>
+
+      <div style="margin-top:0.75rem; display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; font-size:13px;">
+        <div><strong>Asset ID:</strong></div><div id="dbg-asset-{{ block.id }}">{{ asset_id }}</div>
+        <div><strong>SKU:</strong></div><div>{{ sku }}</div>
+        <div><strong>Session ID:</strong></div><div id="dbg-session-{{ block.id }}">–</div>
+        <div><strong>Exposures stored:</strong></div><div id="dbg-exposures-{{ block.id }}">–</div>
+        <div><strong>Watch progress:</strong></div><div id="dbg-progress-{{ block.id }}">0%</div>
+        <div><strong>SDK loaded:</strong></div><div id="dbg-sdk-{{ block.id }}">checking…</div>
+      </div>
+
+      <div id="dbg-log-{{ block.id }}" style="margin-top:0.75rem; max-height:160px; overflow-y:auto; font-size:12px; font-family:monospace; background:#1e1e1e; color:#0f0; padding:0.5rem; border-radius:4px; white-space:pre-wrap;"></div>
+
+      <div style="margin-top:0.75rem;">
+        <button
+          type="button"
+          id="dbg-fire-{{ block.id }}"
+          style="padding:6px 12px; font-size:13px; border:1px solid #333; border-radius:4px; background:#333; color:#fff; cursor:pointer;"
+        >
+          Fire test oce:exposure event
+        </button>
+      </div>
+    </details>
+
+    <script>
+      (function() {
+        var BID   = {{ block.id | json }};
+        var ASSET = {{ asset_id | json }};
+        var SKU   = {{ sku | json }};
+
+        var $log      = document.getElementById('dbg-log-' + BID);
+        var $progress = document.getElementById('dbg-progress-' + BID);
+        var $session  = document.getElementById('dbg-session-' + BID);
+        var $sdk      = document.getElementById('dbg-sdk-' + BID);
+        var $exp      = document.getElementById('dbg-exposures-' + BID);
+        var $btn      = document.getElementById('dbg-fire-' + BID);
+        var video     = document.getElementById('oce-video-' + BID);
+
+        function log(msg) {
+          var ts = new Date().toLocaleTimeString();
+          $log.textContent += '[' + ts + '] ' + msg + '\n';
+          $log.scrollTop = $log.scrollHeight;
+        }
+
+        // Show session & exposure state
+        function refreshState() {
+          try { $session.textContent = localStorage.getItem('_oce_session_id') || '(none)'; } catch(e) {}
+          try {
+            var raw = sessionStorage.getItem('_oce_exposure_ids');
+            var ids = raw ? JSON.parse(raw) : [];
+            $exp.textContent = ids.length + ' — ' + JSON.stringify(ids);
+          } catch(e) { $exp.textContent = '(error reading)'; }
+        }
+        refreshState();
+
+        // Check if external OCE SDK is loaded
+        function checkSdk() {
+          if (typeof window.OCE !== 'undefined' || document.querySelector('script[src*="oce.min.js"]')) {
+            $sdk.textContent = 'Yes';
+            $sdk.style.color = 'green';
+            log('OCE SDK detected on page.');
+          } else {
+            $sdk.textContent = 'No — events still fire, but the external SDK is not loaded.';
+            $sdk.style.color = '#b30';
+            log('OCE SDK not detected. You can still test with the manual fire button.');
+          }
+        }
+        setTimeout(checkSdk, 1000);
+
+        // Listen for oce:exposure events (fired by SDK or manual button)
+        window.addEventListener('oce:exposure', function(e) {
+          log('oce:exposure received — id: ' + (e.detail && e.detail.exposure_id));
+          setTimeout(refreshState, 500);
+        });
+
+        // Track watch progress
+        if (video) {
+          var milestones = [10, 25, 50, 75, 90, 100];
+          var hit = {};
+
+          video.addEventListener('timeupdate', function() {
+            if (!video.duration) return;
+            var pct = Math.round((video.currentTime / video.duration) * 100);
+            $progress.textContent = pct + '%';
+
+            milestones.forEach(function(m) {
+              if (pct >= m && !hit[m]) {
+                hit[m] = true;
+                log('Watch milestone: ' + m + '%');
+              }
+            });
+          });
+
+          video.addEventListener('play',  function() { log('Video PLAY');  });
+          video.addEventListener('pause', function() { log('Video PAUSE'); });
+          video.addEventListener('ended', function() { log('Video ENDED'); });
+        }
+
+        // Manual fire button
+        $btn.addEventListener('click', function() {
+          var exposureId = 'test_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          log('Manually dispatching oce:exposure — id: ' + exposureId);
+          window.dispatchEvent(new CustomEvent('oce:exposure', {
+            detail: {
+              exposure_id: exposureId,
+              asset_id: ASSET,
+              sku: SKU
+            }
+          }));
+        });
+      })();
+    </script>
+  {% endif %}
+</div>
+
+{% schema %}
+{
+  "name": "Test Video Player",
+  "settings": [
+    {
+      "type": "text",
+      "id": "asset_id",
+      "label": "OCE Asset ID",
+      "default": "test-asset-001",
+      "info": "The asset ID registered in OCE for this video."
+    },
+    {
+      "type": "text",
+      "id": "sku",
+      "label": "Product SKU",
+      "default": "TEST-SKU",
+      "info": "SKU of the product this video is associated with."
+    },
+    {
+      "type": "url",
+      "id": "video_url",
+      "label": "Video URL (.mp4)",
+      "info": "Leave blank for the default Big Buck Bunny sample video."
+    },
+    {
+      "type": "url",
+      "id": "poster_url",
+      "label": "Poster Image URL",
+      "info": "Optional thumbnail shown before the video plays."
+    },
+    {
+      "type": "range",
+      "id": "max_width",
+      "min": 320,
+      "max": 1280,
+      "step": 40,
+      "default": 720,
+      "unit": "px",
+      "label": "Max Width"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_debug",
+      "label": "Show debug panel",
+      "default": true,
+      "info": "Displays tracking state, watch milestones, and a button to manually fire exposure events."
+    }
+  ],
+  "presets": [
+    {
+      "name": "OCE Test Video Player",
+      "category": "Video"
+    }
+  ]
+}
+{% endschema %}
