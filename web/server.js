@@ -299,13 +299,18 @@ app.get("/", async (req, res) => {
     try {
       const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
       if (!session || !session.accessToken) {
-        console.log("[OCE] No session for", shop, "— redirecting to OAuth");
-        return res.redirect(`/auth?shop=${encodeURIComponent(shop)}`);
+        console.log("[OCE] No session for", shop, "— sending top-level OAuth redirect");
+        // Can't use res.redirect() because we're inside Shopify's iframe.
+        // Shopify blocks framed loads of its OAuth page (X-Frame-Options: deny).
+        // Instead, serve a tiny HTML page that redirects the TOP window.
+        const authUrl = `${SHOPIFY_APP_URL}/auth?shop=${encodeURIComponent(shop)}`;
+        return res.send(`<!DOCTYPE html><html><head>
+          <script>window.top.location.href = ${JSON.stringify(authUrl)};</script>
+          </head><body>Redirecting to authorize…</body></html>`);
       }
       console.log("[OCE] Session found for", shop, "— serving admin UI");
     } catch (err) {
       console.error("[OCE] Session check error:", err);
-      // Fall through to serve UI anyway — API calls will trigger auth errors
     }
   }
 
