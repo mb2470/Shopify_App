@@ -142,21 +142,12 @@ app.get("/auth/callback", async (req, res) => {
 app.get("/auth/shopify/callback", (req, res) => res.redirect(`/auth/callback?${new URLSearchParams(req.query)}`));
 app.get("/api/auth/callback", (req, res) => res.redirect(`/auth/callback?${new URLSearchParams(req.query)}`));
 
-// ─── Token Exchange (App Bridge v4 embedded auth) ────────────────
-// Instead of OAuth redirects (which break in iframes), App Bridge v4
-// provides a session token via shopify.idToken(). We exchange it for
-// an offline access token server-side — no redirect needed at all.
+// ─── Token Exchange Helper ────────────────────────────────────────
+// Exchanges an App Bridge session token for an offline access token.
+// Used by the authenticate middleware on first contact with a shop.
 
-app.post("/auth/token-exchange", express.json(), async (req, res) => {
-  const shop = req.query.shop || req.body.shop;
-  const sessionToken = req.body.sessionToken;
-
-  if (!shop || !sessionToken) {
-    return res.status(400).json({ error: "Missing shop or sessionToken" });
-  }
-
+async function doTokenExchange(shop, sessionToken) {
   console.log("[OCE] Token exchange for", shop);
-
   try {
     const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: "POST",
@@ -176,10 +167,9 @@ app.post("/auth/token-exchange", express.json(), async (req, res) => {
 
     if (!response.ok || !data.access_token) {
       console.error("[OCE] Token exchange failed:", JSON.stringify(data));
-      return res.status(400).json({ error: data.error_description || data.error || "Token exchange failed" });
+      return { success: false, error: data.error_description || data.error || "Token exchange failed" };
     }
 
-    // Store the session
     await prisma.session.upsert({
       where: { id: `offline_${shop}` },
       create: {
@@ -193,23 +183,21 @@ app.post("/auth/token-exchange", express.json(), async (req, res) => {
       update: { accessToken: data.access_token, scope: data.scope || SCOPES },
     });
 
-    // Ensure settings row exists
     await prisma.oceSettings.upsert({
       where: { shop },
       create: { shop },
       update: {},
     });
 
-    // Register webhooks with the new token
     await registerWebhooks(shop, data.access_token);
 
     console.log("[OCE] Token exchange complete for", shop, "— session stored");
-    return res.json({ success: true });
+    return { success: true };
   } catch (err) {
     console.error("[OCE] Token exchange error:", err);
-    return res.status(500).json({ error: err.message });
+    return { success: false, error: err.message };
   }
-});
+}
 
 // ─── Webhook Registration ─────────────────────────────────────────
 
@@ -277,17 +265,66 @@ app.post("/webhooks/shop/delete", (req, res) => res.status(200).send("OK"));
 // ─── Auth Middleware ──────────────────────────────────────────────
 
 async function authenticate(req, res, next) {
-  const shop = req.query.shop || req.headers["x-shop-domain"];
-  if (!shop) {
-    console.warn("[OCE] Auth failed: missing shop param for", req.method, req.path);
-    return res.status(401).json({ error: "Missing shop" });
-  }
   try {
-    const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
-    if (!session) {
+    let shop = null;
+    let sessionToken = null;
+
+    // 1. Try Bearer session token from App Bridge (preferred for embedded apps)
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      sessionToken = authHeader.slice(7);
+      try {
+        // Decode JWT payload (base64url) to extract shop domain
+        const parts = sessionToken.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(
+            Buffer.from(parts[1], "base64url").toString()
+          );
+          // dest = "https://shop.myshopify.com" → extract domain
+          shop =
+            payload.dest?.replace("https://", "") ||
+            payload.iss?.replace("https://", "").replace("/admin", "");
+          console.log("[OCE] Auth: decoded session token for", shop);
+        }
+      } catch (decodeErr) {
+        console.warn("[OCE] Auth: failed to decode session token:", decodeErr.message);
+      }
+    }
+
+    // 2. Fallback to query param / header (for non-App-Bridge clients)
+    if (!shop) {
+      shop = req.query.shop || req.headers["x-shop-domain"];
+    }
+
+    if (!shop) {
+      console.warn("[OCE] Auth failed: no shop for", req.method, req.path);
+      return res.status(401).json({ error: "Missing shop" });
+    }
+
+    // 3. Look up stored session
+    let session = await prisma.session.findUnique({
+      where: { id: `offline_${shop}` },
+    });
+
+    // 4. No stored session? Auto-exchange the session token for an access token
+    if ((!session || !session.accessToken) && sessionToken) {
+      console.log("[OCE] Auth: no stored session for", shop, "— running token exchange");
+      const result = await doTokenExchange(shop, sessionToken);
+      if (result.success) {
+        session = await prisma.session.findUnique({
+          where: { id: `offline_${shop}` },
+        });
+      } else {
+        console.error("[OCE] Auth: token exchange failed:", result.error);
+        return res.status(401).json({ error: "Token exchange failed: " + result.error });
+      }
+    }
+
+    if (!session || !session.accessToken) {
       console.warn("[OCE] Auth failed: no session for", shop);
       return res.status(401).json({ error: "Not authenticated" });
     }
+
     req.shop = shop;
     req.session = session;
     next();
@@ -360,60 +397,10 @@ app.get("/api/debug/metafields", authenticate, async (req, res) => {
 
 // ─── Admin UI ─────────────────────────────────────────────────────
 
-app.get("/", async (req, res) => {
+app.get("/", (req, res) => {
   const { shop, host } = req.query;
-
-  // If shop param present, verify we have a valid session — redirect to OAuth if not
-  if (shop) {
-    try {
-      const session = await prisma.session.findUnique({ where: { id: `offline_${shop}` } });
-      if (!session || !session.accessToken) {
-        console.log("[OCE] No session for", shop, "— serving token exchange page");
-        // We're inside Shopify's admin iframe. Instead of redirecting (blocked by
-        // X-Frame-Options / cross-origin), use App Bridge v4 token exchange:
-        // 1. Get a session token from shopify.idToken()
-        // 2. POST it to /auth/token-exchange
-        // 3. Server exchanges it for an offline access token — no redirect needed
-        return res.send(`<!DOCTYPE html><html><head>
-          <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-          <script>
-            (async function() {
-              var el = document.getElementById('msg');
-              try {
-                if (!window.shopify || !window.shopify.idToken) {
-                  if(el) el.textContent = 'App Bridge not available. Please open this app from your Shopify admin.';
-                  return;
-                }
-                if(el) el.textContent = 'Getting authorization token…';
-                var token = await shopify.idToken();
-                if(el) el.textContent = 'Exchanging token…';
-                var resp = await fetch('/auth/token-exchange?shop=' + encodeURIComponent(${JSON.stringify(shop)}), {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ sessionToken: token })
-                });
-                var data = await resp.json();
-                if (data.success) {
-                  if(el) el.textContent = 'Authorized! Loading app…';
-                  window.location.reload();
-                } else {
-                  if(el) el.textContent = 'Authorization failed: ' + (data.error || 'Unknown error');
-                }
-              } catch (err) {
-                if(el) el.textContent = 'Error: ' + err.message;
-                console.error('Token exchange error:', err);
-              }
-            })();
-          </script>
-          </head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
-          <p id="msg">Authorizing…</p></body></html>`);
-      }
-      console.log("[OCE] Session found for", shop, "— serving admin UI");
-    } catch (err) {
-      console.error("[OCE] Session check error:", err);
-    }
-  }
-
+  // Always serve the admin UI. Auth happens on the first API call via
+  // App Bridge session token → authenticate middleware → token exchange.
   res.send(getAdminHTML(shop || "", host || ""));
 });
 
@@ -424,6 +411,7 @@ function getAdminHTML(shop, host) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Onsite Commission Engine</title>
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
   <style>
     *{box-sizing:border-box;margin:0;padding:0}
     body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f6f6f7;color:#202223}
@@ -551,9 +539,16 @@ const S="${shop}",B="";
 let st={sdk:true,wh:true,key:false};
 
 async function api(m,p,b){
-  const o={method:m,headers:{"Content-Type":"application/json","X-Shop-Domain":S}};
+  const headers={"Content-Type":"application/json"};
+  try{
+    if(window.shopify&&window.shopify.idToken){
+      const t=await shopify.idToken();
+      headers["Authorization"]="Bearer "+t;
+    }
+  }catch(e){console.warn("Could not get session token:",e)}
+  const o={method:m,headers:headers};
   if(b)o.body=JSON.stringify(b);
-  return(await fetch(B+p+"?shop="+S,o)).json();
+  return(await fetch(B+p,o)).json();
 }
 function msg(t,m){const e=document.getElementById(t==="success"?"sb":"eb");e.textContent=m;e.style.display="block";setTimeout(()=>e.style.display="none",5000)}
 function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return'<span class="badge '+c+'">'+l+"</span>"}
