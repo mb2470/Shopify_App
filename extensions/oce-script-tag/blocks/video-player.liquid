@@ -80,7 +80,57 @@
           $log.scrollTop = $log.scrollHeight;
         }
 
-        // Show session & exposure state
+        // ── Inline exposure handler ─────────────────────────────────
+        // Mirrors the listener in oce-sdk.liquid so the debug panel works
+        // independently — even when the head block or external SDK aren't active.
+        function getSessionId() {
+          var key = '_oce_session_id';
+          var id = null;
+          try { id = localStorage.getItem(key); } catch(e) {}
+          if (!id) {
+            id = 'oce_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            try { localStorage.setItem(key, id); } catch(e) {}
+          }
+          return id;
+        }
+
+        function updateCartAttributes(exposureIds) {
+          fetch('/cart/update.js', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              attributes: {
+                '_oce_exposure_ids': JSON.stringify(exposureIds),
+                '_oce_session_id': getSessionId()
+              }
+            })
+          }).then(function() {
+            log('Cart attributes updated with ' + exposureIds.length + ' exposure(s).');
+          }).catch(function(err) {
+            log('Cart update failed: ' + err);
+          });
+        }
+
+        window.addEventListener('oce:exposure', function(event) {
+          var exposureId = event.detail && event.detail.exposure_id;
+          if (!exposureId) return;
+
+          var stored = [];
+          try {
+            var raw = sessionStorage.getItem('_oce_exposure_ids');
+            if (raw) stored = JSON.parse(raw);
+          } catch(e) {}
+
+          if (stored.indexOf(exposureId) === -1) {
+            stored.push(exposureId);
+            if (stored.length > 50) stored = stored.slice(-50);
+            try { sessionStorage.setItem('_oce_exposure_ids', JSON.stringify(stored)); } catch(e) {}
+          }
+
+          updateCartAttributes(stored);
+        });
+
+        // ── State display ───────────────────────────────────────────
         function refreshState() {
           try { $session.textContent = localStorage.getItem('_oce_session_id') || '(none)'; } catch(e) {}
           try {
@@ -91,27 +141,39 @@
         }
         refreshState();
 
-        // Check if external OCE SDK is loaded
+        // ── SDK detection ───────────────────────────────────────────
         function checkSdk() {
-          if (typeof window.OCE !== 'undefined' || document.querySelector('script[src*="oce.min.js"]')) {
-            $sdk.textContent = 'Yes';
+          var hasGlobal = typeof window.OCE !== 'undefined';
+          var hasScript = !!document.querySelector('script[src*="oce.min.js"]');
+
+          if (hasGlobal) {
+            $sdk.textContent = 'Yes (OCE global found)';
             $sdk.style.color = 'green';
-            log('OCE SDK detected on page.');
+            log('OCE SDK detected — window.OCE is defined.');
+          } else if (hasScript) {
+            $sdk.textContent = 'Script tag found, but window.OCE not set (CDN may be unreachable)';
+            $sdk.style.color = '#b80';
+            log('oce.min.js script tag is in the DOM but window.OCE is not defined.');
+            log('The external CDN script may be unreachable or still loading.');
           } else {
-            $sdk.textContent = 'No — events still fire, but the external SDK is not loaded.';
+            $sdk.textContent = 'No — inline listener active, events will still work.';
             $sdk.style.color = '#b30';
-            log('OCE SDK not detected. You can still test with the manual fire button.');
+            log('OCE SDK script tag not found in page head.');
+            log('Possible causes:');
+            log('  1. "OCE Script" app embed is not enabled in Theme > Customize > App embeds');
+            log('  2. App metafields not yet synced — re-save API key in the admin panel');
+            log('Inline exposure listener is active — fire button and cart tracking will still work.');
           }
         }
-        setTimeout(checkSdk, 1000);
+        setTimeout(checkSdk, 1500);
 
-        // Listen for oce:exposure events (fired by SDK or manual button)
+        // ── Exposure event logging ──────────────────────────────────
         window.addEventListener('oce:exposure', function(e) {
           log('oce:exposure received — id: ' + (e.detail && e.detail.exposure_id));
           setTimeout(refreshState, 500);
         });
 
-        // Track watch progress
+        // ── Watch progress tracking ─────────────────────────────────
         if (video) {
           var milestones = [10, 25, 50, 75, 90, 100];
           var hit = {};
@@ -134,7 +196,7 @@
           video.addEventListener('ended', function() { log('Video ENDED'); });
         }
 
-        // Manual fire button
+        // ── Manual fire button ──────────────────────────────────────
         $btn.addEventListener('click', function() {
           var exposureId = 'test_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
           log('Manually dispatching oce:exposure — id: ' + exposureId);
