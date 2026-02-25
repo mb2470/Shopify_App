@@ -9,3 +9,8 @@ handle = "oce-tracking-sdk"
   name = "OCE Script"
   type = "oce-sdk"
   target = "head"
+
+  [[extensions.blocks]]
+  name = "Test Video Player"
+  type = "video-player"
+  target = "section"
