@@ -18,6 +18,7 @@ import {
   updateSettings,
   updateApiKey,
   getIntegrationStatus,
+  syncAppMetafields,
 } from "./backend/routes/settings.js";
 
 const prisma = new PrismaClient();
@@ -223,11 +224,16 @@ app.get("/api/settings", authenticate, async (req, res) => {
 
 app.put("/api/settings", authenticate, async (req, res) => {
   const settings = await updateSettings(req.shop, req.body);
+  // Sync to Shopify app metafields so the Liquid theme extension can read them
+  await syncAppMetafields(req.shop, req.session.accessToken);
   res.json({ success: true, settings });
 });
 
 app.put("/api/settings/api-key", authenticate, async (req, res) => {
-  res.json(await updateApiKey(req.shop, req.body.apiKey));
+  const result = await updateApiKey(req.shop, req.body.apiKey);
+  // Sync to Shopify app metafields so the Liquid theme extension can read them
+  await syncAppMetafields(req.shop, req.session.accessToken);
+  res.json(result);
 });
 
 app.get("/api/settings/status", authenticate, async (req, res) => {
@@ -331,7 +337,7 @@ function getAdminHTML(shop, host) {
   <div class="grid-2">
     <div class="card"><div class="card-row"><div><h2>OCE SDK Script</h2><p style="font-size:13px;color:#6d7175">Auto-injects tracking into storefront</p></div>
       <div class="tog" onclick="tSdk()"><div id="st" class="tog-t on"><div class="tog-th"></div></div></div></div>
-      <div id="sc" style="margin-top:12px"><div class="code">&lt;script<br>&nbsp;&nbsp;src="https://app.onsiteaffiliate.com/sdk/oce.min.js"<br>&nbsp;&nbsp;data-api-key="YOUR_KEY"<br>&nbsp;&nbsp;defer&gt;<br>&lt;/script&gt;</div>
+      <div id="sc" style="margin-top:12px"><div class="code">&lt;script<br>&nbsp;&nbsp;src="https://app.onsiteaffiliate.com/sdk/oce.min.js"<br>&nbsp;&nbsp;data-api-key="<span id="pk">YOUR_KEY</span>"<br>&nbsp;&nbsp;defer&gt;<br>&lt;/script&gt;</div>
       <p style="font-size:12px;color:#6d7175;margin-top:8px">Auto-detects Videowise, Tolstoy, Firework, YouTube, Vimeo, HTML5 players.</p></div>
     </div>
     <div class="card"><div class="card-row"><div><h2>Order Webhook</h2><p style="font-size:13px;color:#6d7175">Sends orders to OCE for attribution</p></div>
@@ -385,7 +391,7 @@ function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],
 async function load(){
   try{
     const s=await api("GET","/api/settings");
-    if(s.hasApiKey){document.getElementById("kd").style.display="block";document.getElementById("kf").style.display="none";document.getElementById("mk").textContent=s.apiKey;document.getElementById("qs").style.display="none"}
+    if(s.hasApiKey){document.getElementById("kd").style.display="block";document.getElementById("kf").style.display="none";document.getElementById("mk").textContent=s.apiKey;document.getElementById("qs").style.display="none";document.getElementById("pk").textContent=s.apiKey}
     tog("st",s.sdkEnabled);tog("wt",s.webhookEnabled);st.sdk=s.sdkEnabled;st.wh=s.webhookEnabled;
     document.getElementById("am").value=s.attributionModel;
     document.getElementById("aw").value=s.attributionWindow;document.getElementById("wv").textContent=s.attributionWindow;

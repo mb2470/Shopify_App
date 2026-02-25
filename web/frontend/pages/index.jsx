@@ -40,7 +40,7 @@ import {
 } from "@shopify/polaris-icons";
 import { useLoaderData, useSubmit, useActionData, useNavigation } from "@remix-run/react";
 import { json } from "@remix-run/node";
-import { getSettings, updateSettings, updateApiKey, getIntegrationStatus } from "../backend/routes/settings.js";
+import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields } from "../backend/routes/settings.js";
 import shopify from "../server.js";
 
 // ─── Remix Loader / Action ────────────────────────────────────────
@@ -67,11 +67,13 @@ export async function action({ request }) {
     case "save-api-key": {
       const apiKey = formData.get("apiKey");
       const result = await updateApiKey(shop, apiKey);
+      await syncAppMetafields(shop, session.accessToken);
       return json(result);
     }
     case "save-settings": {
       const updates = JSON.parse(formData.get("settings"));
       const result = await updateSettings(shop, updates);
+      await syncAppMetafields(shop, session.accessToken);
       return json({ success: true, settings: result });
     }
     default:
@@ -346,7 +348,7 @@ export default function OceDashboard() {
                       <br />
                       {'  src="https://app.onsiteaffiliate.com/sdk/oce.min.js"'}
                       <br />
-                      {'  data-api-key="YOUR_API_KEY"'}
+                      {`  data-api-key="${settings.hasApiKey ? settings.apiKey : 'YOUR_API_KEY'}"`}
                       <br />
                       {"  defer>"}
                       <br />

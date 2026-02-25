@@ -148,4 +148,94 @@ export async function getIntegrationStatus(shop) {
   };
 }
 
-export default { getSettings, updateSettings, updateApiKey, getIntegrationStatus };
+/**
+ * Sync OCE settings to Shopify app metafields.
+ * The theme app extension reads from app.metafields.oce.* — this function
+ * writes those values via the GraphQL Admin API so the Liquid template
+ * can inject the SDK script tag.
+ */
+export async function syncAppMetafields(shop, accessToken) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings) {
+    console.error("[OCE] syncAppMetafields: no settings for", shop);
+    return { success: false, error: "No settings found" };
+  }
+
+  const apiVersion = "2024-10";
+  const graphqlUrl = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Shopify-Access-Token": accessToken,
+  };
+
+  // Step 1: Get the current app installation ID (owner for app metafields)
+  let ownerId;
+  try {
+    const installRes = await fetch(graphqlUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: `{ currentAppInstallation { id } }`,
+      }),
+    });
+    const installData = await installRes.json();
+    ownerId = installData?.data?.currentAppInstallation?.id;
+  } catch (err) {
+    console.error("[OCE] Failed to fetch app installation ID:", err.message);
+    return { success: false, error: "Could not reach Shopify API" };
+  }
+
+  if (!ownerId) {
+    console.error("[OCE] No app installation ID returned");
+    return { success: false, error: "Could not get app installation ID" };
+  }
+
+  // Step 2: Write both metafields the Liquid template expects
+  const metafields = [
+    {
+      namespace: "oce",
+      key: "api_key",
+      type: "single_line_text_field",
+      value: settings.apiKey || "",
+      ownerId,
+    },
+    {
+      namespace: "oce",
+      key: "sdk_enabled",
+      type: "single_line_text_field",
+      value: String(settings.sdkEnabled),
+      ownerId,
+    },
+  ];
+
+  try {
+    const setRes = await fetch(graphqlUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: `mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+          metafieldsSet(metafields: $metafields) {
+            metafields { id namespace key }
+            userErrors { field message }
+          }
+        }`,
+        variables: { metafields },
+      }),
+    });
+    const setData = await setRes.json();
+    const userErrors = setData?.data?.metafieldsSet?.userErrors;
+
+    if (userErrors && userErrors.length > 0) {
+      console.error("[OCE] Metafield sync errors:", userErrors);
+      return { success: false, error: userErrors[0].message };
+    }
+
+    console.log("[OCE] App metafields synced for", shop);
+    return { success: true };
+  } catch (err) {
+    console.error("[OCE] Metafield sync fetch failed:", err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+export default { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields };
