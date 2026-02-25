@@ -550,6 +550,20 @@ const S="${shop}",B="";
 let st={sdk:true,wh:true,key:false};
 console.log("[init] shop:",S,"shopify obj:",typeof window.shopify,"idToken:",typeof (window.shopify&&window.shopify.idToken));
 
+// ── Diagnostic: verify what App Bridge actually sees ──
+(function(){
+  var meta=document.querySelector('meta[name="shopify-api-key"]');
+  console.log("[diag] meta tag value:",meta?JSON.stringify(meta.content):"META TAG MISSING");
+  console.log("[diag] iframe origin:",window.location.origin);
+  console.log("[diag] iframe URL:",window.location.href);
+  console.log("[diag] parent===self (not embedded):",window.parent===window);
+  if(window.shopify){
+    console.log("[diag] shopify object keys:",Object.keys(window.shopify));
+    console.log("[diag] shopify.config:",JSON.stringify(window.shopify.config||"none"));
+    console.log("[diag] shopify.environment:",JSON.stringify(window.shopify.environment||"none"));
+  }
+})();
+
 async function getSessionToken(attempt){
   attempt=attempt||1;
   if(!window.shopify||!window.shopify.idToken){
