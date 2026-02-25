@@ -8,6 +8,7 @@
  *  - Script tag injection
  */
 
+import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
 import { PrismaClient } from "@prisma/client";
@@ -39,6 +40,12 @@ const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL;
 const SCOPES =
   "read_orders,write_orders,read_customers,read_products,read_script_tags,write_script_tags";
+
+// Startup diagnostics — shows if env vars are loaded
+console.log("[env] SHOPIFY_API_KEY:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING!");
+console.log("[env] SHOPIFY_API_SECRET:", SHOPIFY_API_SECRET ? "set (" + SHOPIFY_API_SECRET.length + " chars)" : "MISSING!");
+console.log("[env] SHOPIFY_APP_URL:", SHOPIFY_APP_URL || "MISSING!");
+if (!SHOPIFY_API_KEY) console.error("[env] FATAL: SHOPIFY_API_KEY is not set. App Bridge will fail to initialize.");
 
 function verifyHmac(query) {
   const { hmac, ...rest } = query;
