@@ -149,12 +149,26 @@ export class OceApiService {
   // ─── Validation ─────────────────────────────────────────────────
 
   /**
-   * Validate API key by requesting dashboard stats
-   * If the key is invalid, /manage returns 401
+   * Validate API key by making a lightweight request.
+   * Sends an empty events array to /events-exposure — a 401 means the key
+   * is invalid; any other response (200, 400 validation error) means valid.
    */
   async validateApiKey() {
     try {
-      await this.manage("stats.overview", { period_days: 1 });
+      const url = `${this.baseUrl}/events-exposure`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-Key": this.apiKey,
+        },
+        body: JSON.stringify({ events: [] }),
+      });
+
+      if (response.status === 401) {
+        return { valid: false, error: "Invalid API key" };
+      }
+      // Any non-401 response means the key is recognized
       return { valid: true };
     } catch (error) {
       return { valid: false, error: error.message };
