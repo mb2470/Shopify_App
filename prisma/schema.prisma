@@ -32,17 +32,6 @@ model OceSettings {
   sdkEnabled          Boolean  @default(true)
   webhookEnabled      Boolean  @default(true)
 
-  // Attribution settings
-  attributionModel    String   @default("last-touch") // last-touch | first-touch
-  attributionWindow   Int      @default(30) // days
-  commissionRate      Float    @default(10.0) // percentage
-
-  // Qualifying events
-  trackImpressions    Boolean  @default(true)
-  trackClicks         Boolean  @default(true)
-  trackWatchProgress  Boolean  @default(true)
-  minWatchPercent     Int      @default(25) // minimum watch % to qualify
-
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

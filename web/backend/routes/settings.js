@@ -23,13 +23,6 @@ export async function getSettings(shop) {
         apiKey: "",
         sdkEnabled: true,
         webhookEnabled: true,
-        attributionModel: "last-touch",
-        attributionWindow: 30,
-        commissionRate: 10.0,
-        trackImpressions: true,
-        trackClicks: true,
-        trackWatchProgress: true,
-        minWatchPercent: 25,
       },
     });
   }
@@ -54,13 +47,6 @@ export async function updateSettings(shop, updates) {
   const allowedFields = [
     "sdkEnabled",
     "webhookEnabled",
-    "attributionModel",
-    "attributionWindow",
-    "commissionRate",
-    "trackImpressions",
-    "trackClicks",
-    "trackWatchProgress",
-    "minWatchPercent",
   ];
 
   // Filter to allowed fields only

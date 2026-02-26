@@ -18,13 +18,8 @@ import {
   Box,
   Divider,
   TextField,
-  ChoiceList,
-  RangeSlider,
-  Select,
-  Checkbox,
   Icon,
   Spinner,
-  Collapsible,
   Link,
   SkeletonBodyText,
 } from "@shopify/polaris";
@@ -104,15 +99,6 @@ export default function OceDashboard() {
   // ─── Settings State ──────────────────────────────────────────
   const [sdkEnabled, setSdkEnabled] = useState(settings.sdkEnabled);
   const [webhookEnabled, setWebhookEnabled] = useState(settings.webhookEnabled);
-  const [attributionModel, setAttributionModel] = useState(settings.attributionModel);
-  const [attributionWindow, setAttributionWindow] = useState(settings.attributionWindow);
-  const [commissionRate, setCommissionRate] = useState(settings.commissionRate);
-  const [trackImpressions, setTrackImpressions] = useState(settings.trackImpressions);
-  const [trackClicks, setTrackClicks] = useState(settings.trackClicks);
-  const [trackWatchProgress, setTrackWatchProgress] = useState(settings.trackWatchProgress);
-  const [minWatchPercent, setMinWatchPercent] = useState(settings.minWatchPercent);
-
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // ─── Handlers ────────────────────────────────────────────────
 
@@ -128,24 +114,10 @@ export default function OceDashboard() {
     formData.set("intent", "save-settings");
     formData.set(
       "settings",
-      JSON.stringify({
-        sdkEnabled,
-        webhookEnabled,
-        attributionModel,
-        attributionWindow,
-        commissionRate,
-        trackImpressions,
-        trackClicks,
-        trackWatchProgress,
-        minWatchPercent,
-      })
+      JSON.stringify({ sdkEnabled, webhookEnabled })
     );
     submit(formData, { method: "post" });
-  }, [
-    sdkEnabled, webhookEnabled, attributionModel, attributionWindow,
-    commissionRate, trackImpressions, trackClicks, trackWatchProgress,
-    minWatchPercent, submit,
-  ]);
+  }, [sdkEnabled, webhookEnabled, submit]);
 
   // ─── Status Badge Helper ─────────────────────────────────────
 
@@ -314,12 +286,6 @@ export default function OceDashboard() {
               />
               <ChecklistItem
                 number={4}
-                title="Configure Attribution Settings"
-                description="Set your commission rates, attribution window, and qualifying events"
-                done={false}
-              />
-              <ChecklistItem
-                number={5}
                 title="Register Video Assets"
                 description="Map your creator videos to products in the OCE dashboard"
                 done={false}
@@ -421,112 +387,11 @@ export default function OceDashboard() {
           </Layout.Section>
         </Layout>
 
-        {/* ── Attribution Settings ──────────────────────────────── */}
-        <Card>
-          <BlockStack gap="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <Text variant="headingMd" as="h2">Attribution Settings</Text>
-              <Button
-                variant="plain"
-                onClick={() => setSettingsOpen(!settingsOpen)}
-                ariaExpanded={settingsOpen}
-              >
-                {settingsOpen ? "Collapse" : "Expand"}
-              </Button>
-            </InlineStack>
-
-            <Collapsible open={settingsOpen}>
-              <BlockStack gap="500">
-                <Divider />
-
-                {/* Attribution Model */}
-                <Select
-                  label="Attribution Model"
-                  options={[
-                    { label: "Last Touch — credit goes to the last video watched", value: "last-touch" },
-                    { label: "First Touch — credit goes to the first video watched", value: "first-touch" },
-                  ]}
-                  value={attributionModel}
-                  onChange={setAttributionModel}
-                  helpText="Determines which creator gets commission when multiple videos were watched before purchase."
-                />
-
-                {/* Attribution Window */}
-                <RangeSlider
-                  label={`Attribution Window: ${attributionWindow} days`}
-                  value={attributionWindow}
-                  onChange={setAttributionWindow}
-                  min={1}
-                  max={90}
-                  step={1}
-                  helpText="How long after a video view can a purchase be attributed to a creator."
-                  output
-                />
-
-                {/* Commission Rate */}
-                <TextField
-                  label="Default Commission Rate (%)"
-                  type="number"
-                  value={String(commissionRate)}
-                  onChange={(val) => setCommissionRate(parseFloat(val) || 0)}
-                  suffix="%"
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  helpText="Default percentage of attributed revenue paid to creators. Override per-SKU or per-creator in OCE dashboard."
-                />
-
-                <Divider />
-
-                {/* Qualifying Events */}
-                <Text variant="headingSm" as="h3">Qualifying Events</Text>
-                <Text variant="bodySm" tone="subdued">
-                  Events that must occur during a video view for it to be eligible for attribution.
-                </Text>
-
-                <Checkbox
-                  label="Track Impressions"
-                  helpText="Track when a creator video first appears in the viewport"
-                  checked={trackImpressions}
-                  onChange={setTrackImpressions}
-                />
-                <Checkbox
-                  label="Track Clicks"
-                  helpText="Track when a user clicks on or interacts with a creator video"
-                  checked={trackClicks}
-                  onChange={setTrackClicks}
-                />
-                <Checkbox
-                  label="Track Watch Progress"
-                  helpText="Track how much of the video a user watches"
-                  checked={trackWatchProgress}
-                  onChange={setTrackWatchProgress}
-                />
-
-                {trackWatchProgress && (
-                  <RangeSlider
-                    label={`Minimum Watch Percentage: ${minWatchPercent}%`}
-                    value={minWatchPercent}
-                    onChange={setMinWatchPercent}
-                    min={5}
-                    max={100}
-                    step={5}
-                    helpText="Minimum percentage of video that must be watched to qualify for attribution."
-                    output
-                  />
-                )}
-
-                <Divider />
-
-                <InlineStack align="end">
-                  <Button variant="primary" onClick={handleSaveSettings} loading={isLoading}>
-                    Save Attribution Settings
-                  </Button>
-                </InlineStack>
-              </BlockStack>
-            </Collapsible>
-          </BlockStack>
-        </Card>
+        <InlineStack align="end">
+          <Button variant="primary" onClick={handleSaveSettings} loading={isLoading}>
+            Save Settings
+          </Button>
+        </InlineStack>
 
         {/* ── How It Works ──────────────────────────────────────── */}
         <Card>
