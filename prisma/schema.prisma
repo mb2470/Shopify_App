@@ -2,7 +2,7 @@
 // Stores merchant settings, API keys, and attribution config
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
