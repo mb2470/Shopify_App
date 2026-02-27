@@ -23,6 +23,41 @@ import {
   getAppMetafields,
 } from "./backend/routes/settings.js";
 
+// ─── Email Outreach System Imports ───────────────────────────────
+import {
+  getEmailSettings,
+  updateEmailSettings,
+  testCloudflareConnection,
+  testSmartleadConnection,
+} from "./backend/routes/email-settings.js";
+import {
+  listDomains,
+  getDomainStatus,
+  searchDomains,
+  purchaseDomain,
+  provisionDns,
+  verifyDns,
+} from "./backend/routes/email-domains.js";
+import {
+  listEmailAccounts,
+  createEmailAccount,
+  toggleWarmup,
+  getWarmupStats,
+  assignToCampaign,
+} from "./backend/routes/email-accounts.js";
+import {
+  listCampaigns,
+  createCampaign,
+  getCampaignDetail,
+} from "./backend/routes/email-campaigns.js";
+import {
+  listConversations,
+  getConversation,
+  markAsRead,
+  getInboxStats,
+} from "./backend/routes/email-inbox.js";
+import { GmailService } from "./backend/services/gmail-api.js";
+
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -266,6 +301,11 @@ app.post("/webhooks/app/uninstalled", async (req, res) => {
   }
   res.status(200).send("OK");
   try {
+    await prisma.emailConversation.deleteMany({ where: { shop } });
+    await prisma.emailAccount.deleteMany({ where: { shop } });
+    await prisma.emailDomain.deleteMany({ where: { shop } });
+    await prisma.outreachCampaign.deleteMany({ where: { shop } });
+    await prisma.emailSettings.deleteMany({ where: { shop } });
     await prisma.oceSettings.deleteMany({ where: { shop } });
     await prisma.orderSync.deleteMany({ where: { shop } });
     await prisma.videoAsset.deleteMany({ where: { shop } });
@@ -278,6 +318,124 @@ app.post("/webhooks/app/uninstalled", async (req, res) => {
 app.post("/webhooks/customers/delete", (req, res) => res.status(200).send("OK"));
 app.post("/webhooks/customers/data-request", (req, res) => res.status(200).send("OK"));
 app.post("/webhooks/shop/delete", (req, res) => res.status(200).send("OK"));
+
+// ─── Smartlead Webhook (Email Reply Handler) ─────────────────────
+// Receives inbound email replies from Smartlead. No HMAC — uses optional
+// shared secret query param for basic validation.
+
+app.post("/webhooks/smartlead/reply", express.json(), async (req, res) => {
+  // Optional: validate shared secret
+  const secret = process.env.SMARTLEAD_WEBHOOK_SECRET;
+  if (secret && req.query.secret !== secret) {
+    return res.status(401).json({ error: "Invalid webhook secret" });
+  }
+
+  res.status(200).json({ ok: true });
+
+  try {
+    const {
+      from_email,
+      to_email,
+      email_body,
+      email_body_html,
+      subject,
+      campaign_name,
+      campaign_id,
+      lead_id,
+    } = req.body;
+
+    if (!to_email) {
+      console.warn("[Email Webhook] Missing to_email in payload");
+      return;
+    }
+
+    // Look up shop by matching the to_email to an EmailAccount
+    const emailAccount = await prisma.emailAccount.findUnique({
+      where: { emailAddress: to_email },
+    });
+
+    if (!emailAccount) {
+      console.warn("[Email Webhook] No account found for", to_email);
+      return;
+    }
+
+    const shop = emailAccount.shop;
+
+    // Find matching campaign by Smartlead campaign ID or name
+    let localCampaignId = null;
+    if (campaign_id) {
+      const campaign = await prisma.outreachCampaign.findFirst({
+        where: { shop, smartleadCampaignId: String(campaign_id) },
+      });
+      localCampaignId = campaign?.id || null;
+    }
+
+    // Store conversation
+    const conversation = await prisma.emailConversation.create({
+      data: {
+        shop,
+        campaignId: localCampaignId,
+        fromEmail: from_email || "unknown",
+        toEmail: to_email,
+        subject: subject || null,
+        body: email_body || "",
+        bodyHtml: email_body_html || null,
+        direction: "inbound",
+        smartleadLeadId: lead_id ? String(lead_id) : null,
+      },
+    });
+
+    console.log("[Email Webhook] Stored reply from", from_email, "→", to_email, "id:", conversation.id);
+
+    // Update campaign reply count
+    if (localCampaignId) {
+      await prisma.outreachCampaign.update({
+        where: { id: localCampaignId },
+        data: { totalReplies: { increment: 1 } },
+      });
+    }
+
+    // Forward to Gmail if configured
+    const emailSettings = await prisma.emailSettings.findUnique({ where: { shop } });
+    if (emailSettings?.gmailRefreshToken && emailSettings?.gmailEmail) {
+      try {
+        const gmail = new GmailService({
+          accessToken: emailSettings.gmailAccessToken,
+          refreshToken: emailSettings.gmailRefreshToken,
+          clientId: process.env.GOOGLE_CLIENT_ID,
+          clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        });
+
+        const result = await gmail.insertMessage({
+          from: from_email || "unknown@unknown.com",
+          to: emailSettings.gmailEmail,
+          subject: subject || "(no subject)",
+          body: email_body_html || email_body || "",
+        });
+
+        // Store Gmail message ID
+        await prisma.emailConversation.update({
+          where: { id: conversation.id },
+          data: { gmailMessageId: result.id },
+        });
+
+        // If token was refreshed, persist it
+        if (gmail.accessToken !== emailSettings.gmailAccessToken) {
+          await prisma.emailSettings.update({
+            where: { shop },
+            data: { gmailAccessToken: gmail.accessToken },
+          });
+        }
+
+        console.log("[Email Webhook] Forwarded to Gmail:", emailSettings.gmailEmail, "msgId:", result.id);
+      } catch (gmailErr) {
+        console.error("[Email Webhook] Gmail forward failed:", gmailErr.message);
+      }
+    }
+  } catch (error) {
+    console.error("[Email Webhook] Processing error:", error);
+  }
+});
 
 // ─── Auth Middleware ──────────────────────────────────────────────
 
@@ -429,6 +587,129 @@ app.get("/api/debug/metafields", authenticate, async (req, res) => {
   }
 });
 
+// ─── Email Outreach API Routes ────────────────────────────────────
+
+// Email Settings
+app.get("/api/email/settings", authenticate, async (req, res) => {
+  try { res.json(await getEmailSettings(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put("/api/email/settings", authenticate, async (req, res) => {
+  try { res.json(await updateEmailSettings(req.shop, req.body)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/settings/test-cf", authenticate, async (req, res) => {
+  try { res.json(await testCloudflareConnection(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/settings/test-sl", authenticate, async (req, res) => {
+  try { res.json(await testSmartleadConnection(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Domain Management
+app.get("/api/email/domains", authenticate, async (req, res) => {
+  try { res.json(await listDomains(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/domains/search", authenticate, async (req, res) => {
+  try { res.json(await searchDomains(req.shop, req.body.query)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/domains/purchase", authenticate, async (req, res) => {
+  try { res.json(await purchaseDomain(req.shop, req.body.domain, req.body.years)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/domains/:id/provision", authenticate, async (req, res) => {
+  try { res.json(await provisionDns(req.shop, req.params.id, req.body.provider)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/domains/:id/verify", authenticate, async (req, res) => {
+  try { res.json(await verifyDns(req.shop, req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/email/domains/:id", authenticate, async (req, res) => {
+  try { res.json(await getDomainStatus(req.shop, req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Email Accounts
+app.get("/api/email/accounts", authenticate, async (req, res) => {
+  try { res.json(await listEmailAccounts(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/accounts", authenticate, async (req, res) => {
+  try { res.json(await createEmailAccount(req.shop, req.body)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/accounts/:id/warmup", authenticate, async (req, res) => {
+  try { res.json(await toggleWarmup(req.shop, req.params.id, req.body.enabled)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/email/accounts/:id/warmup", authenticate, async (req, res) => {
+  try { res.json(await getWarmupStats(req.shop, req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/accounts/:id/assign", authenticate, async (req, res) => {
+  try { res.json(await assignToCampaign(req.shop, req.params.id, req.body.campaignId)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Campaigns
+app.get("/api/email/campaigns", authenticate, async (req, res) => {
+  try { res.json(await listCampaigns(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/email/campaigns", authenticate, async (req, res) => {
+  try { res.json(await createCampaign(req.shop, req.body.name)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/email/campaigns/:id", authenticate, async (req, res) => {
+  try { res.json(await getCampaignDetail(req.shop, req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Inbox
+app.get("/api/email/inbox", authenticate, async (req, res) => {
+  try {
+    const { campaignId, page, limit } = req.query;
+    res.json(await listConversations(req.shop, {
+      campaignId,
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 25,
+    }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/email/inbox/stats", authenticate, async (req, res) => {
+  try { res.json(await getInboxStats(req.shop)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/api/email/inbox/:id", authenticate, async (req, res) => {
+  try { res.json(await getConversation(req.shop, req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put("/api/email/inbox/:id/read", authenticate, async (req, res) => {
+  try { res.json(await markAsRead(req.shop, req.params.id)); }
+  catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Admin UI ─────────────────────────────────────────────────────
 
 app.get("/", (req, res) => {
@@ -495,6 +776,28 @@ function getAdminHTML(shop, host) {
     .o-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #f1f1f1}
     @media(max-width:768px){.grid-3,.grid-4,.grid-2{grid-template-columns:1fr}}
     a{color:#005bd3}
+    .tabs{display:flex;gap:0;margin-bottom:24px;border-bottom:2px solid #e1e3e5}
+    .tab{padding:10px 20px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:none;color:#6d7175;border-bottom:2px solid transparent;margin-bottom:-2px;transition:color .2s,border-color .2s}
+    .tab:hover{color:#202223}
+    .tab.active{color:#005bd3;border-bottom-color:#005bd3}
+    .tab .tab-badge{background:#e51c00;color:#fff;font-size:11px;padding:1px 6px;border-radius:8px;margin-left:6px;font-weight:600}
+    .tab-content{display:none}.tab-content.active{display:block}
+    .tbl{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px}
+    .tbl th{text-align:left;padding:8px 12px;background:#f6f6f7;font-weight:600;font-size:12px;color:#6d7175;border-bottom:1px solid #e1e3e5}
+    .tbl td{padding:8px 12px;border-bottom:1px solid #f1f1f1;vertical-align:middle}
+    .tbl tr:hover td{background:#f9fafb}
+    .dns-badges{display:flex;gap:4px;flex-wrap:wrap}
+    .inbox-item{padding:12px 16px;border-bottom:1px solid #f1f1f1;cursor:pointer;display:flex;justify-content:space-between;align-items:center}
+    .inbox-item:hover{background:#f9fafb}
+    .inbox-item.unread{font-weight:600}
+    .inbox-item .from{font-size:13px}.inbox-item .subj{font-size:12px;color:#6d7175;margin-top:2px}
+    .inbox-item .time{font-size:11px;color:#8c9196;white-space:nowrap}
+    .empty-state{text-align:center;padding:40px 20px;color:#6d7175}
+    .empty-state h3{font-size:16px;font-weight:600;color:#202223;margin-bottom:8px}
+    .btn-sm{padding:4px 10px;font-size:12px;border-radius:6px}
+    .btn-danger{background:#e51c00;color:#fff;border:none;cursor:pointer}.btn-danger:hover{background:#c41600}
+    .inline-form{display:flex;gap:8px;align-items:flex-end}
+    .inline-form .form-g{margin-bottom:0;flex:1}
   </style>
 </head>
 <body>
@@ -502,8 +805,14 @@ function getAdminHTML(shop, host) {
   <div id="sb" class="banner banner-ok"></div>
   <div id="eb" class="banner banner-err"></div>
 
-  <div class="header"><div><h1>Onsite Commission Engine</h1><p>Track creator video engagement and attribute conversions</p></div>
-    <a href="https://app.onsiteaffiliate.com" target="_blank" class="btn btn-p">View OCE Dashboard ↗</a></div>
+  <div class="header"><div><h1>OCE Platform</h1><p>Commission engine + email outreach</p></div></div>
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('oce')">OCE Dashboard</button>
+    <button class="tab" onclick="switchTab('email')">Email Outreach <span id="inbox-badge" class="tab-badge" style="display:none">0</span></button>
+  </div>
+
+  <div id="tab-oce" class="tab-content active">
 
   <div class="card"><div class="card-row"><h2>Integration Status</h2><span id="ob" class="badge b-info">Loading...</span></div>
     <div class="grid-3">
@@ -570,6 +879,119 @@ function getAdminHTML(shop, host) {
       <div class="fs"><div class="ic">💰</div><h4>Attribution</h4><p>Commission calculated</p></div>
     </div>
   </div>
+
+  </div><!-- /tab-oce -->
+
+  <div id="tab-email" class="tab-content">
+
+    <!-- Email Settings Card -->
+    <div class="card">
+      <div class="card-row"><h2>Email Settings</h2>
+        <button class="btn btn-link" onclick="var p=document.getElementById('email-settings-form');p.style.display=p.style.display==='none'?'block':'none'">Configure</button>
+      </div>
+      <div class="grid-3" style="margin-top:8px">
+        <div class="status-box"><h3>Cloudflare</h3><span id="cf-status" class="badge b-info">--</span></div>
+        <div class="status-box"><h3>Smartlead</h3><span id="sl-status" class="badge b-info">--</span></div>
+        <div class="status-box"><h3>Gmail</h3><span id="gm-status" class="badge b-info">--</span></div>
+      </div>
+      <div id="email-settings-form" style="display:none"><hr>
+        <div class="grid-2">
+          <div>
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Cloudflare</h3>
+            <div class="form-g"><label>Account ID</label><input type="text" id="es-cf-id" placeholder="Cloudflare Account ID"></div>
+            <div class="form-g"><label>API Token</label><input type="password" id="es-cf-token" placeholder="Cloudflare API Token"></div>
+            <button class="btn btn-s btn-sm" onclick="testCf()">Test Connection</button>
+          </div>
+          <div>
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Smartlead</h3>
+            <div class="form-g"><label>API Key</label><input type="password" id="es-sl-key" placeholder="Smartlead API Key"></div>
+            <button class="btn btn-s btn-sm" onclick="testSl()">Test Connection</button>
+          </div>
+        </div>
+        <hr>
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">WHOIS Contact (for domain registration)</h3>
+        <div class="grid-2">
+          <div class="form-g"><label>First Name</label><input type="text" id="es-wh-fn"></div>
+          <div class="form-g"><label>Last Name</label><input type="text" id="es-wh-ln"></div>
+        </div>
+        <div class="form-g"><label>Address</label><input type="text" id="es-wh-addr"></div>
+        <div class="grid-4">
+          <div class="form-g"><label>City</label><input type="text" id="es-wh-city"></div>
+          <div class="form-g"><label>State</label><input type="text" id="es-wh-state"></div>
+          <div class="form-g"><label>ZIP</label><input type="text" id="es-wh-zip"></div>
+          <div class="form-g"><label>Country</label><input type="text" id="es-wh-country" value="US"></div>
+        </div>
+        <div class="grid-2">
+          <div class="form-g"><label>Phone</label><input type="text" id="es-wh-phone" placeholder="+1.5551234567"></div>
+          <div class="form-g"><label>Email</label><input type="text" id="es-wh-email"></div>
+        </div>
+        <hr>
+        <div style="text-align:right"><button class="btn btn-p" onclick="saveEmailSettings()">Save Email Settings</button></div>
+      </div>
+    </div>
+
+    <!-- Domain Manager Card -->
+    <div class="card">
+      <h2>Domain Manager</h2>
+      <div class="inline-form" style="margin-top:12px">
+        <div class="form-g"><label>Search Domains</label><input type="text" id="domain-search" placeholder="mybrand-outreach.com"></div>
+        <button class="btn btn-p" onclick="searchDom()">Check Availability</button>
+      </div>
+      <div id="domain-results" style="margin-top:12px"></div>
+      <hr>
+      <h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Your Domains</h3>
+      <div id="domains-list">
+        <div class="empty-state"><h3>No domains yet</h3><p>Search and purchase a domain above to get started.</p></div>
+      </div>
+    </div>
+
+    <!-- Email Accounts Card -->
+    <div class="card">
+      <div class="card-row"><h2>Email Accounts</h2>
+        <button class="btn btn-p btn-sm" onclick="document.getElementById('add-account-form').style.display='block'">+ Add Account</button>
+      </div>
+      <div id="add-account-form" style="display:none;margin-top:12px;background:#f6f6f7;border-radius:8px;padding:16px">
+        <div class="grid-2">
+          <div class="form-g"><label>Domain</label><select id="aa-domain"></select></div>
+          <div class="form-g"><label>Local Part</label><input type="text" id="aa-local" placeholder="john"></div>
+        </div>
+        <div class="grid-2">
+          <div class="form-g"><label>Password</label><input type="password" id="aa-pass" placeholder="SMTP/IMAP password"></div>
+          <div class="form-g"><label>Display Name</label><input type="text" id="aa-name" placeholder="John Smith"></div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-p btn-sm" onclick="addAccount()">Create Account</button>
+          <button class="btn btn-s btn-sm" onclick="document.getElementById('add-account-form').style.display='none'">Cancel</button>
+        </div>
+      </div>
+      <div id="accounts-list" style="margin-top:12px">
+        <div class="empty-state"><p>No email accounts yet.</p></div>
+      </div>
+    </div>
+
+    <!-- Campaigns Card -->
+    <div class="card">
+      <div class="card-row"><h2>Campaigns</h2>
+        <div class="inline-form">
+          <input type="text" id="new-camp-name" placeholder="Campaign name" style="width:200px">
+          <button class="btn btn-p btn-sm" onclick="addCampaign()">+ Create</button>
+        </div>
+      </div>
+      <div id="campaigns-list" style="margin-top:12px">
+        <div class="empty-state"><p>No campaigns yet.</p></div>
+      </div>
+    </div>
+
+    <!-- Inbox Card -->
+    <div class="card">
+      <div class="card-row"><h2>Inbox</h2><span id="inbox-count" class="badge b-info">0 messages</span></div>
+      <div id="inbox-list" style="margin-top:12px">
+        <div class="empty-state"><h3>No replies yet</h3><p>Replies from leads will appear here.</p></div>
+      </div>
+    </div>
+
+  </div><!-- /tab-email -->
+
 </div>
 
 <script>
@@ -700,6 +1122,244 @@ async function saveSets(){
 function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on");else e.classList.remove("on")}
 function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none"}
 function tWh(){st.wh=!st.wh;tog("wt",st.wh)}
+
+// ── Tab Navigation ──
+function switchTab(tab){
+  document.querySelectorAll('.tab').forEach(function(t){t.classList.remove('active')});
+  document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});
+  document.getElementById('tab-'+tab).classList.add('active');
+  event.target.closest?event.target.closest('.tab').classList.add('active'):event.target.classList.add('active');
+  if(tab==='email')loadEmailData();
+}
+
+// ── Email Settings ──
+async function loadEmailSettings(){
+  try{
+    var s=await api("GET","/api/email/settings");
+    document.getElementById('cf-status').outerHTML=s.hasCloudflare?bg('connected'):bg('not_configured');
+    document.getElementById('sl-status').outerHTML=s.hasSmartlead?bg('connected'):bg('not_configured');
+    document.getElementById('gm-status').outerHTML=s.hasGmail?bg('connected'):bg('not_configured');
+    if(s.cloudflareAccountId)document.getElementById('es-cf-id').value=s.cloudflareAccountId;
+    if(s.cloudflareApiToken)document.getElementById('es-cf-token').value=s.cloudflareApiToken;
+    if(s.smartleadApiKey)document.getElementById('es-sl-key').value=s.smartleadApiKey;
+    if(s.whoisFirstName)document.getElementById('es-wh-fn').value=s.whoisFirstName;
+    if(s.whoisLastName)document.getElementById('es-wh-ln').value=s.whoisLastName;
+    if(s.whoisAddress1)document.getElementById('es-wh-addr').value=s.whoisAddress1;
+    if(s.whoisCity)document.getElementById('es-wh-city').value=s.whoisCity;
+    if(s.whoisState)document.getElementById('es-wh-state').value=s.whoisState;
+    if(s.whoisZip)document.getElementById('es-wh-zip').value=s.whoisZip;
+    if(s.whoisCountry)document.getElementById('es-wh-country').value=s.whoisCountry;
+    if(s.whoisPhone)document.getElementById('es-wh-phone').value=s.whoisPhone;
+    if(s.whoisEmail)document.getElementById('es-wh-email').value=s.whoisEmail;
+  }catch(e){console.log("Email settings load error:",e)}
+}
+
+async function saveEmailSettings(){
+  try{
+    var r=await api("PUT","/api/email/settings",{
+      cloudflareAccountId:document.getElementById('es-cf-id').value.trim(),
+      cloudflareApiToken:document.getElementById('es-cf-token').value.trim(),
+      smartleadApiKey:document.getElementById('es-sl-key').value.trim(),
+      whoisFirstName:document.getElementById('es-wh-fn').value.trim(),
+      whoisLastName:document.getElementById('es-wh-ln').value.trim(),
+      whoisAddress1:document.getElementById('es-wh-addr').value.trim(),
+      whoisCity:document.getElementById('es-wh-city').value.trim(),
+      whoisState:document.getElementById('es-wh-state').value.trim(),
+      whoisZip:document.getElementById('es-wh-zip').value.trim(),
+      whoisCountry:document.getElementById('es-wh-country').value.trim(),
+      whoisPhone:document.getElementById('es-wh-phone').value.trim(),
+      whoisEmail:document.getElementById('es-wh-email').value.trim()
+    });
+    if(r.success)msg("success","Email settings saved!");else msg("error","Save failed");
+    loadEmailSettings();
+  }catch(e){msg("error","Error: "+e.message)}
+}
+
+async function testCf(){
+  try{var r=await api("POST","/api/email/settings/test-cf");msg(r.valid?"success":"error",r.valid?"Cloudflare connected!":"Cloudflare: "+(r.error||"Failed"));}
+  catch(e){msg("error","CF test error: "+e.message)}
+}
+async function testSl(){
+  try{var r=await api("POST","/api/email/settings/test-sl");msg(r.valid?"success":"error",r.valid?"Smartlead connected!":"Smartlead: "+(r.error||"Failed"));}
+  catch(e){msg("error","SL test error: "+e.message)}
+}
+
+// ── Domains ──
+var emailDomains=[];
+
+async function loadDomains(){
+  try{
+    emailDomains=await api("GET","/api/email/domains");
+    var el=document.getElementById('domains-list');
+    if(!emailDomains.length){el.innerHTML='<div class="empty-state"><h3>No domains yet</h3><p>Search and purchase a domain above to get started.</p></div>';return;}
+    var html='<table class="tbl"><tr><th>Domain</th><th>Status</th><th>DNS</th><th>Accounts</th><th>Actions</th></tr>';
+    emailDomains.forEach(function(d){
+      var dns='<div class="dns-badges">'+
+        (d.mxVerified?'<span class="badge b-ok">MX</span>':'<span class="badge b-err">MX</span>')+
+        (d.spfVerified?'<span class="badge b-ok">SPF</span>':'<span class="badge b-err">SPF</span>')+
+        (d.dkimVerified?'<span class="badge b-ok">DKIM</span>':'<span class="badge b-err">DKIM</span>')+
+        (d.dmarcVerified?'<span class="badge b-ok">DMARC</span>':'<span class="badge b-err">DMARC</span>')+
+        '</div>';
+      html+='<tr><td><strong>'+d.domain+'</strong></td><td>'+bg(d.registrarStatus)+'</td><td>'+dns+'</td>';
+      html+='<td>'+(d.emailAccounts?d.emailAccounts.length:0)+'</td>';
+      html+='<td><button class="btn btn-s btn-sm" onclick="provDns(\\''+d.id+'\\')">Provision DNS</button> ';
+      html+='<button class="btn btn-s btn-sm" onclick="verDns(\\''+d.id+'\\')">Verify</button></td></tr>';
+    });
+    html+='</table>';
+    el.innerHTML=html;
+    // Update domain dropdown for account creation
+    var sel=document.getElementById('aa-domain');
+    sel.innerHTML=emailDomains.map(function(d){return'<option value="'+d.id+'">'+d.domain+'</option>'}).join('');
+  }catch(e){console.log("Domains load error:",e)}
+}
+
+async function searchDom(){
+  var q=document.getElementById('domain-search').value.trim();if(!q)return;
+  var el=document.getElementById('domain-results');
+  el.innerHTML='<p>Searching...</p>';
+  try{
+    var results=await api("POST","/api/email/domains/search",{query:q});
+    if(!results||!results.length){el.innerHTML='<p>No results found.</p>';return;}
+    var html='<table class="tbl"><tr><th>Domain</th><th>Available</th><th>Price</th><th></th></tr>';
+    results.forEach(function(r){
+      var avail=r.available?'<span class="badge b-ok">Available</span>':'<span class="badge b-err">Taken</span>';
+      var price=r.price?('$'+r.price):'--';
+      html+='<tr><td>'+r.name+'</td><td>'+avail+'</td><td>'+price+'</td>';
+      html+='<td>'+(r.available?'<button class="btn btn-p btn-sm" onclick="buyDom(\\''+r.name+'\\')">Purchase</button>':'')+'</td></tr>';
+    });
+    html+='</table>';
+    el.innerHTML=html;
+  }catch(e){el.innerHTML='<p style="color:#e51c00">Error: '+e.message+'</p>';}
+}
+
+async function buyDom(domain){
+  if(!confirm('Purchase '+domain+'? This will charge your Cloudflare account.'))return;
+  try{
+    await api("POST","/api/email/domains/purchase",{domain:domain,years:1});
+    msg("success",domain+" purchased!");
+    loadDomains();
+  }catch(e){msg("error","Purchase failed: "+e.message)}
+}
+
+async function provDns(id){
+  try{var r=await api("POST","/api/email/domains/"+id+"/provision");
+    var errs=r.errors&&r.errors.length?(" Warnings: "+r.errors.join(", ")):"";
+    msg("success","DNS records provisioned!"+errs);loadDomains();
+  }catch(e){msg("error","DNS provision failed: "+e.message)}
+}
+
+async function verDns(id){
+  try{var r=await api("POST","/api/email/domains/"+id+"/verify");
+    msg("success","DNS verified — MX:"+r.mx+" SPF:"+r.spf+" DKIM:"+r.dkim+" DMARC:"+r.dmarc);loadDomains();
+  }catch(e){msg("error","DNS verify failed: "+e.message)}
+}
+
+// ── Email Accounts ──
+async function loadAccounts(){
+  try{
+    var accounts=await api("GET","/api/email/accounts");
+    var el=document.getElementById('accounts-list');
+    if(!accounts.length){el.innerHTML='<div class="empty-state"><p>No email accounts yet.</p></div>';return;}
+    var html='<table class="tbl"><tr><th>Email</th><th>Domain</th><th>Warmup</th><th>Status</th><th>Actions</th></tr>';
+    accounts.forEach(function(a){
+      var warmBadge=a.warmupEnabled?'<span class="badge b-ok">'+a.warmupStatus+'</span>':'<span class="badge b-warn">Paused</span>';
+      html+='<tr><td><strong>'+a.emailAddress+'</strong></td>';
+      html+='<td>'+(a.domain?a.domain.domain:'--')+'</td>';
+      html+='<td>'+warmBadge+'</td>';
+      html+='<td>'+bg(a.status)+'</td>';
+      html+='<td><button class="btn btn-s btn-sm" onclick="toggleWarmup(\\''+a.id+'\\','+(!a.warmupEnabled)+')">'+(a.warmupEnabled?'Pause':'Enable')+' Warmup</button></td></tr>';
+    });
+    html+='</table>';
+    el.innerHTML=html;
+  }catch(e){console.log("Accounts load error:",e)}
+}
+
+async function addAccount(){
+  var domainId=document.getElementById('aa-domain').value;
+  var localPart=document.getElementById('aa-local').value.trim();
+  var password=document.getElementById('aa-pass').value;
+  var fromName=document.getElementById('aa-name').value.trim();
+  if(!domainId||!localPart||!password){msg("error","Domain, local part, and password are required");return;}
+  try{
+    await api("POST","/api/email/accounts",{domainId:domainId,localPart:localPart,password:password,fromName:fromName});
+    msg("success","Account created!");
+    document.getElementById('add-account-form').style.display='none';
+    document.getElementById('aa-local').value='';document.getElementById('aa-pass').value='';document.getElementById('aa-name').value='';
+    loadAccounts();
+  }catch(e){msg("error","Create account failed: "+e.message)}
+}
+
+async function toggleWarmup(id,enabled){
+  try{await api("POST","/api/email/accounts/"+id+"/warmup",{enabled:enabled});msg("success","Warmup "+(enabled?"enabled":"paused"));loadAccounts();}
+  catch(e){msg("error","Warmup toggle failed: "+e.message)}
+}
+
+// ── Campaigns ──
+async function loadCampaigns(){
+  try{
+    var campaigns=await api("GET","/api/email/campaigns");
+    var el=document.getElementById('campaigns-list');
+    if(!campaigns.length){el.innerHTML='<div class="empty-state"><p>No campaigns yet.</p></div>';return;}
+    var html='<table class="tbl"><tr><th>Name</th><th>Status</th><th>Accounts</th><th>Sent</th><th>Replies</th></tr>';
+    campaigns.forEach(function(c){
+      var acctCount=c.emailAccountIds?c.emailAccountIds.length:0;
+      html+='<tr><td><strong>'+c.name+'</strong></td><td>'+bg(c.status)+'</td>';
+      html+='<td>'+acctCount+'</td><td>'+c.totalSent+'</td><td>'+c.totalReplies+'</td></tr>';
+    });
+    html+='</table>';
+    el.innerHTML=html;
+  }catch(e){console.log("Campaigns load error:",e)}
+}
+
+async function addCampaign(){
+  var name=document.getElementById('new-camp-name').value.trim();
+  if(!name){msg("error","Campaign name required");return;}
+  try{
+    await api("POST","/api/email/campaigns",{name:name});
+    msg("success","Campaign created!");
+    document.getElementById('new-camp-name').value='';
+    loadCampaigns();
+  }catch(e){msg("error","Create campaign failed: "+e.message)}
+}
+
+// ── Inbox ──
+async function loadInbox(){
+  try{
+    var data=await api("GET","/api/email/inbox");
+    var stats=await api("GET","/api/email/inbox/stats");
+    document.getElementById('inbox-count').textContent=stats.total+' messages'+(stats.unread?' ('+stats.unread+' unread)':'');
+    var badge=document.getElementById('inbox-badge');
+    if(stats.unread>0){badge.textContent=stats.unread;badge.style.display='inline';}else{badge.style.display='none';}
+    var el=document.getElementById('inbox-list');
+    if(!data.conversations||!data.conversations.length){el.innerHTML='<div class="empty-state"><h3>No replies yet</h3><p>Replies from leads will appear here.</p></div>';return;}
+    var html='';
+    data.conversations.forEach(function(c){
+      var cls='inbox-item'+(c.isRead?'':' unread');
+      var time=new Date(c.createdAt).toLocaleDateString();
+      html+='<div class="'+cls+'" onclick="viewConvo(\\''+c.id+'\\')">';
+      html+='<div><div class="from">'+c.fromEmail+'</div><div class="subj">'+(c.subject||'(no subject)')+' — '+(c.body||'').substring(0,80)+'</div></div>';
+      html+='<div class="time">'+time+'</div></div>';
+    });
+    el.innerHTML=html;
+  }catch(e){console.log("Inbox load error:",e)}
+}
+
+async function viewConvo(id){
+  try{
+    var c=await api("GET","/api/email/inbox/"+id);
+    alert("From: "+c.fromEmail+"\\nTo: "+c.toEmail+"\\nSubject: "+(c.subject||"(none)")+"\\n\\n"+c.body);
+    loadInbox();
+  }catch(e){msg("error","Error: "+e.message)}
+}
+
+// ── Load all email data ──
+function loadEmailData(){
+  loadEmailSettings();
+  loadDomains();
+  loadAccounts();
+  loadCampaigns();
+  loadInbox();
+}
 
 // Wait for App Bridge iframe handshake before first API call
 if(window.shopify&&window.shopify.idToken){

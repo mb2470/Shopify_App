@@ -75,3 +75,111 @@ model VideoAsset {
   @@unique([shop, assetId])
   @@index([shop])
 }
+
+// ─── Email Outreach System ───────────────────────────────────────
+
+// Per-shop configuration for email outreach (API keys, WHOIS defaults, Gmail OAuth)
+model EmailSettings {
+  id                    String   @id @default(cuid())
+  shop                  String   @unique
+  cloudflareAccountId   String   @default("")
+  cloudflareApiToken    String   @default("")
+  smartleadApiKey       String   @default("")
+  gmailAccessToken      String?
+  gmailRefreshToken     String?
+  gmailEmail            String?
+  whoisFirstName        String   @default("")
+  whoisLastName         String   @default("")
+  whoisAddress1         String   @default("")
+  whoisCity             String   @default("")
+  whoisState            String   @default("")
+  whoisZip              String   @default("")
+  whoisCountry          String   @default("US")
+  whoisPhone            String   @default("")
+  whoisEmail            String   @default("")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+// Domains purchased/managed via Cloudflare Registrar
+model EmailDomain {
+  id                String   @id @default(cuid())
+  shop              String
+  domain            String   @unique
+  cloudflareZoneId  String?
+  registrarStatus   String   @default("pending") // pending | active | failed | expired
+  dnsConfigured     Boolean  @default(false)
+  mxVerified        Boolean  @default(false)
+  spfVerified       Boolean  @default(false)
+  dkimVerified      Boolean  @default(false)
+  dmarcVerified     Boolean  @default(false)
+  purchasedAt       DateTime?
+  expiresAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  emailAccounts     EmailAccount[]
+
+  @@index([shop])
+}
+
+// Individual mailboxes connected to Smartlead
+model EmailAccount {
+  id                  String   @id @default(cuid())
+  shop                String
+  domainId            String
+  domain              EmailDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  emailAddress        String   @unique
+  smartleadAccountId  String?
+  smtpHost            String?
+  smtpPort            Int?     @default(587)
+  imapHost            String?
+  imapPort            Int?     @default(993)
+  warmupEnabled       Boolean  @default(true)
+  warmupStatus        String   @default("pending") // pending | active | completed | paused
+  dailySendLimit      Int      @default(20)
+  status              String   @default("active")  // active | paused | disabled | error
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([shop])
+  @@index([domainId])
+}
+
+// Smartlead outreach campaigns
+model OutreachCampaign {
+  id                    String   @id @default(cuid())
+  shop                  String
+  name                  String
+  smartleadCampaignId   String?
+  status                String   @default("draft") // draft | active | paused | completed
+  emailAccountIds       String?  // JSON array of assigned EmailAccount IDs
+  totalLeads            Int      @default(0)
+  totalSent             Int      @default(0)
+  totalReplies          Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([shop])
+}
+
+// Inbound/outbound email messages caught via Smartlead webhooks
+model EmailConversation {
+  id                String   @id @default(cuid())
+  shop              String
+  campaignId        String?
+  fromEmail         String
+  toEmail           String
+  subject           String?
+  body              String
+  bodyHtml          String?
+  direction         String   @default("inbound") // inbound | outbound
+  smartleadLeadId   String?
+  gmailMessageId    String?  // Set if forwarded to Gmail
+  isRead            Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  @@index([shop])
+  @@index([campaignId])
+  @@index([fromEmail])
+}
