@@ -805,7 +805,7 @@ function getAdminHTML(shop, host) {
   <div id="sb" class="banner banner-ok"></div>
   <div id="eb" class="banner banner-err"></div>
 
-  <div class="header"><div><h1>OCE Platform</h1><p>Commission engine + email outreach</p></div></div>
+  <div class="header"><div><h1>Merchant Tools</h1></div></div>
 
   <div class="tabs">
     <button class="tab active" onclick="switchTab('oce')">OCE Dashboard</button>
