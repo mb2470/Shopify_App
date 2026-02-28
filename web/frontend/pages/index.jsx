@@ -22,6 +22,8 @@ import {
   Spinner,
   Link,
   SkeletonBodyText,
+  Collapsible,
+  ButtonGroup,
 } from "@shopify/polaris";
 import {
   CheckCircleIcon,
@@ -33,9 +35,9 @@ import {
   CodeIcon,
   OrderIcon,
 } from "@shopify/polaris-icons";
-import { useLoaderData, useSubmit, useActionData, useNavigation } from "@remix-run/react";
+import { useLoaderData, useSubmit, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import { json } from "@remix-run/node";
-import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields } from "../backend/routes/settings.js";
+import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview } from "../backend/routes/settings.js";
 import shopify from "../server.js";
 
 // ─── Remix Loader / Action ────────────────────────────────────────
@@ -74,6 +76,11 @@ export async function action({ request }) {
         console.log("[OCE] Remix settings sync result:", JSON.stringify(syncResult));
         return json({ success: true, settings: result, metafieldSync: syncResult });
       }
+      case "fetch-stats": {
+        const periodDays = parseInt(formData.get("periodDays")) || 30;
+        const result = await getStatsOverview(shop, periodDays);
+        return json({ statsResult: result });
+      }
       default:
         return json({ error: "Unknown action" }, { status: 400 });
     }
@@ -99,6 +106,29 @@ export default function OceDashboard() {
   // ─── Settings State ──────────────────────────────────────────
   const [sdkEnabled, setSdkEnabled] = useState(settings.sdkEnabled);
   const [webhookEnabled, setWebhookEnabled] = useState(settings.webhookEnabled);
+
+  // ─── Stats State ───────────────────────────────────────────
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [statsPeriod, setStatsPeriod] = useState(30);
+  const statsFetcher = useFetcher();
+  const statsData = statsFetcher.data?.statsResult;
+  const statsLoading = statsFetcher.state === "submitting";
+
+  const handleFetchStats = useCallback((days) => {
+    setStatsPeriod(days);
+    const formData = new FormData();
+    formData.set("intent", "fetch-stats");
+    formData.set("periodDays", String(days));
+    statsFetcher.submit(formData, { method: "post" });
+  }, [statsFetcher]);
+
+  const handleToggleStats = useCallback(() => {
+    const willOpen = !statsOpen;
+    setStatsOpen(willOpen);
+    if (willOpen && !statsData) {
+      handleFetchStats(statsPeriod);
+    }
+  }, [statsOpen, statsData, statsPeriod, handleFetchStats]);
 
   // ─── Handlers ────────────────────────────────────────────────
 
@@ -392,6 +422,101 @@ export default function OceDashboard() {
             Save Settings
           </Button>
         </InlineStack>
+
+        {/* ── Statistics ──────────────────────────────────────────── */}
+        <Card>
+          <BlockStack gap="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text variant="headingMd" as="h2">Statistics</Text>
+              <Button onClick={handleToggleStats} variant="plain">
+                {statsOpen ? "Collapse" : "Expand"}
+              </Button>
+            </InlineStack>
+            <Collapsible open={statsOpen} id="stats-collapsible">
+              <BlockStack gap="400">
+                <Divider />
+                <InlineStack gap="200">
+                  <ButtonGroup>
+                    <Button
+                      variant={statsPeriod === 7 ? "primary" : "secondary"}
+                      onClick={() => handleFetchStats(7)}
+                      size="slim"
+                    >
+                      7 days
+                    </Button>
+                    <Button
+                      variant={statsPeriod === 30 ? "primary" : "secondary"}
+                      onClick={() => handleFetchStats(30)}
+                      size="slim"
+                    >
+                      30 days
+                    </Button>
+                    <Button
+                      variant={statsPeriod === 90 ? "primary" : "secondary"}
+                      onClick={() => handleFetchStats(90)}
+                      size="slim"
+                    >
+                      90 days
+                    </Button>
+                  </ButtonGroup>
+                </InlineStack>
+                {statsLoading && (
+                  <Box padding="400">
+                    <InlineStack align="center">
+                      <Spinner size="small" />
+                      <Text variant="bodySm" tone="subdued">Loading statistics...</Text>
+                    </InlineStack>
+                  </Box>
+                )}
+                {statsData?.ok && statsData.data && !statsLoading && (
+                  <InlineGrid columns={3} gap="400">
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Exposures</Text>
+                        <Text variant="headingLg">{statsData.data.total_exposures.toLocaleString()}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Orders</Text>
+                        <Text variant="headingLg">{statsData.data.total_orders.toLocaleString()}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Revenue</Text>
+                        <Text variant="headingLg">${statsData.data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Commission</Text>
+                        <Text variant="headingLg">${statsData.data.total_commission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Active Creators</Text>
+                        <Text variant="headingLg">{statsData.data.active_creators.toLocaleString()}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Active Assets</Text>
+                        <Text variant="headingLg">{statsData.data.active_assets.toLocaleString()}</Text>
+                      </BlockStack>
+                    </Box>
+                  </InlineGrid>
+                )}
+                {statsData && !statsData.ok && !statsLoading && (
+                  <Banner tone="critical">
+                    {statsData.error || "Failed to load statistics"}
+                  </Banner>
+                )}
+              </BlockStack>
+            </Collapsible>
+          </BlockStack>
+        </Card>
 
         {/* ── How It Works ──────────────────────────────────────── */}
         <Card>

@@ -341,4 +341,17 @@ export async function getAppMetafields(shop, accessToken) {
   }
 }
 
-export default { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getAppMetafields };
+/**
+ * GET /api/stats
+ * Fetch stats overview from the OCE Management API
+ */
+export async function getStatsOverview(shop, periodDays = 30) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings || !settings.apiKey) {
+    return { ok: false, error: "API key not configured" };
+  }
+  const oceApi = new OceApiService(settings.apiKey);
+  return oceApi.getStats(periodDays);
+}
+
+export default { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getAppMetafields, getStatsOverview };

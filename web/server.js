@@ -21,6 +21,7 @@ import {
   getIntegrationStatus,
   syncAppMetafields,
   getAppMetafields,
+  getStatsOverview,
 } from "./backend/routes/settings.js";
 
 const prisma = new PrismaClient();
@@ -429,6 +430,19 @@ app.get("/api/debug/metafields", authenticate, async (req, res) => {
   }
 });
 
+// ─── Stats Route ──────────────────────────────────────────────────
+
+app.get("/api/stats", authenticate, async (req, res) => {
+  try {
+    const periodDays = parseInt(req.query.period_days) || 30;
+    const result = await getStatsOverview(req.shop, periodDays);
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] GET /api/stats error:", err);
+    res.status(500).json({ error: "Failed to fetch stats", detail: err.message });
+  }
+});
+
 // ─── Admin UI ─────────────────────────────────────────────────────
 
 app.get("/", (req, res) => {
@@ -543,22 +557,25 @@ function getAdminHTML(shop, host) {
     </div>
   </div>
 
-  <div class="card"><div class="card-row"><h2>Attribution Settings</h2><button class="btn btn-link" onclick="var p=document.getElementById('sp');p.style.display=p.style.display==='none'?'block':'none'">Expand ▾</button></div>
-    <div id="sp" style="display:none"><hr>
-      <div class="form-g"><label>Attribution Model</label><select id="am"><option value="last-touch">Last Touch</option><option value="first-touch">First Touch</option></select>
-        <p class="help">Which creator gets commission when multiple videos watched.</p></div>
-      <div class="form-g"><label>Attribution Window: <span id="wv">30</span> days</label>
-        <input type="range" id="aw" min="1" max="90" value="30" oninput="document.getElementById('wv').textContent=this.value" style="width:100%">
-        <p class="help">How long after a view can a purchase be attributed.</p></div>
-      <div class="form-g"><label>Commission Rate (%)</label><input type="number" id="cr" value="10" min="0" max="100" step="0.5">
-        <p class="help">Default rate. Override per-SKU/creator in OCE dashboard.</p></div>
-      <hr><h3 style="font-size:14px;font-weight:600;margin-bottom:8px">Qualifying Events</h3>
-      <div class="cb"><input type="checkbox" id="ti" checked><label for="ti">Track Impressions</label></div>
-      <div class="cb"><input type="checkbox" id="tc" checked><label for="tc">Track Clicks</label></div>
-      <div class="cb"><input type="checkbox" id="tw" checked><label for="tw">Track Watch Progress</label></div>
-      <div class="form-g" style="margin-top:12px"><label>Min Watch %: <span id="mv">25</span>%</label>
-        <input type="range" id="mw" min="5" max="100" step="5" value="25" oninput="document.getElementById('mv').textContent=this.value" style="width:100%"></div>
-      <hr><div style="text-align:right"><button class="btn btn-p" onclick="saveSets()">Save Attribution Settings</button></div>
+  <div class="card"><div class="card-row"><h2>Statistics</h2><button class="btn btn-link" id="stats-toggle" onclick="toggleStats()">Expand ▾</button></div>
+    <div id="stats-panel" style="display:none"><hr>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-s" id="sp7" onclick="loadStats(7)">7 days</button>
+        <button class="btn btn-p" id="sp30" onclick="loadStats(30)">30 days</button>
+        <button class="btn btn-s" id="sp90" onclick="loadStats(90)">90 days</button>
+      </div>
+      <div id="stats-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Loading statistics...</div>
+      <div id="stats-content" style="display:none">
+        <div class="grid-3">
+          <div class="status-box"><h3>Total Exposures</h3><p id="stat-exp" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Total Orders</h3><p id="stat-ord" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Total Revenue</h3><p id="stat-rev" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Total Commission</h3><p id="stat-com" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Active Creators</h3><p id="stat-cre" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Active Assets</h3><p id="stat-ast" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+        </div>
+      </div>
+      <div id="stats-error" style="display:none;color:#6e1717;padding:12px;background:#fff4f4;border-radius:8px"></div>
     </div>
   </div>
 
@@ -648,11 +665,6 @@ async function load(){
     const s=await api("GET","/api/settings");
     if(s.hasApiKey){document.getElementById("kd").style.display="block";document.getElementById("kf").style.display="none";document.getElementById("mk").textContent=s.apiKey;document.getElementById("qs").style.display="none";document.getElementById("pk").textContent=s.apiKey}
     tog("st",s.sdkEnabled);tog("wt",s.webhookEnabled);st.sdk=s.sdkEnabled;st.wh=s.webhookEnabled;
-    document.getElementById("am").value=s.attributionModel;
-    document.getElementById("aw").value=s.attributionWindow;document.getElementById("wv").textContent=s.attributionWindow;
-    document.getElementById("cr").value=s.commissionRate;
-    document.getElementById("ti").checked=s.trackImpressions;document.getElementById("tc").checked=s.trackClicks;document.getElementById("tw").checked=s.trackWatchProgress;
-    document.getElementById("mw").value=s.minWatchPercent;document.getElementById("mv").textContent=s.minWatchPercent;
   }catch(e){console.log("Settings load pending auth")}
   try{
     const x=await api("GET","/api/settings/status");
@@ -685,16 +697,45 @@ async function saveKey(){
   }
 }
 
-async function saveSets(){
-  const r=await api("PUT","/api/settings",{sdkEnabled:st.sdk,webhookEnabled:st.wh,
-    attributionModel:document.getElementById("am").value,
-    attributionWindow:parseInt(document.getElementById("aw").value),
-    commissionRate:parseFloat(document.getElementById("cr").value),
-    trackImpressions:document.getElementById("ti").checked,
-    trackClicks:document.getElementById("tc").checked,
-    trackWatchProgress:document.getElementById("tw").checked,
-    minWatchPercent:parseInt(document.getElementById("mw").value)});
-  if(r.success)msg("success","Settings saved!");else msg("error","Save failed");
+let statsOpen=false;
+function toggleStats(){
+  statsOpen=!statsOpen;
+  document.getElementById("stats-panel").style.display=statsOpen?"block":"none";
+  document.getElementById("stats-toggle").textContent=statsOpen?"Collapse ▴":"Expand ▾";
+  if(statsOpen&&!document.getElementById("stats-content").dataset.loaded){loadStats(30)}
+}
+function setActivePeriod(days){
+  ["sp7","sp30","sp90"].forEach(function(id){
+    var el=document.getElementById(id);
+    el.className=el.id==="sp"+days?"btn btn-p":"btn btn-s";
+  });
+}
+async function loadStats(days){
+  setActivePeriod(days);
+  document.getElementById("stats-loading").style.display="block";
+  document.getElementById("stats-content").style.display="none";
+  document.getElementById("stats-error").style.display="none";
+  try{
+    var r=await api("GET","/api/stats?period_days="+days);
+    if(r.ok&&r.data){
+      var d=r.data;
+      document.getElementById("stat-exp").textContent=d.total_exposures.toLocaleString();
+      document.getElementById("stat-ord").textContent=d.total_orders.toLocaleString();
+      document.getElementById("stat-rev").textContent="$"+d.total_revenue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      document.getElementById("stat-com").textContent="$"+d.total_commission.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+      document.getElementById("stat-cre").textContent=d.active_creators.toLocaleString();
+      document.getElementById("stat-ast").textContent=d.active_assets.toLocaleString();
+      document.getElementById("stats-content").style.display="block";
+      document.getElementById("stats-content").dataset.loaded="1";
+    }else{
+      document.getElementById("stats-error").textContent=r.error||"Failed to load statistics";
+      document.getElementById("stats-error").style.display="block";
+    }
+  }catch(e){
+    document.getElementById("stats-error").textContent="Error: "+e.message;
+    document.getElementById("stats-error").style.display="block";
+  }
+  document.getElementById("stats-loading").style.display="none";
 }
 
 function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on");else e.classList.remove("on")}
