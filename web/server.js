@@ -436,10 +436,24 @@ app.get("/api/stats", authenticate, async (req, res) => {
   try {
     const periodDays = parseInt(req.query.period_days) || 30;
     const result = await getStatsOverview(req.shop, periodDays);
-    res.json(result);
+    console.log("[OCE] GET /api/stats raw response:", JSON.stringify(result));
+
+    // Normalize: the stats may be at result.data or at the top level
+    const stats = result?.data || result || {};
+    res.json({
+      ok: result?.ok !== false,
+      data: {
+        total_exposures: Number(stats.total_exposures) || 0,
+        total_orders: Number(stats.total_orders) || 0,
+        total_revenue: Number(stats.total_revenue) || 0,
+        total_commission: Number(stats.total_commission) || 0,
+        active_creators: Number(stats.active_creators) || 0,
+        active_assets: Number(stats.active_assets) || 0,
+      },
+    });
   } catch (err) {
     console.error("[OCE] GET /api/stats error:", err);
-    res.status(500).json({ error: "Failed to fetch stats", detail: err.message });
+    res.status(500).json({ ok: false, error: "Failed to fetch stats", detail: err.message });
   }
 });
 
@@ -717,14 +731,17 @@ async function loadStats(days){
   document.getElementById("stats-error").style.display="none";
   try{
     var r=await api("GET","/api/stats?period_days="+days);
-    if(r.ok&&r.data){
+    console.log("[stats] response:",JSON.stringify(r));
+    if(r.ok!==false&&r.data){
       var d=r.data;
-      document.getElementById("stat-exp").textContent=d.total_exposures.toLocaleString();
-      document.getElementById("stat-ord").textContent=d.total_orders.toLocaleString();
-      document.getElementById("stat-rev").textContent="$"+d.total_revenue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-      document.getElementById("stat-com").textContent="$"+d.total_commission.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-      document.getElementById("stat-cre").textContent=d.active_creators.toLocaleString();
-      document.getElementById("stat-ast").textContent=d.active_assets.toLocaleString();
+      var fmt=function(v){return (Number(v)||0).toLocaleString()};
+      var cur=function(v){return "$"+(Number(v)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})};
+      document.getElementById("stat-exp").textContent=fmt(d.total_exposures);
+      document.getElementById("stat-ord").textContent=fmt(d.total_orders);
+      document.getElementById("stat-rev").textContent=cur(d.total_revenue);
+      document.getElementById("stat-com").textContent=cur(d.total_commission);
+      document.getElementById("stat-cre").textContent=fmt(d.active_creators);
+      document.getElementById("stat-ast").textContent=fmt(d.active_assets);
       document.getElementById("stats-content").style.display="block";
       document.getElementById("stats-content").dataset.loaded="1";
     }else{

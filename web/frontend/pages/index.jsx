@@ -79,7 +79,21 @@ export async function action({ request }) {
       case "fetch-stats": {
         const periodDays = parseInt(formData.get("periodDays")) || 30;
         const result = await getStatsOverview(shop, periodDays);
-        return json({ statsResult: result });
+        console.log("[OCE] Remix stats raw response:", JSON.stringify(result));
+        const stats = result?.data || result || {};
+        return json({
+          statsResult: {
+            ok: result?.ok !== false,
+            data: {
+              total_exposures: Number(stats.total_exposures) || 0,
+              total_orders: Number(stats.total_orders) || 0,
+              total_revenue: Number(stats.total_revenue) || 0,
+              total_commission: Number(stats.total_commission) || 0,
+              active_creators: Number(stats.active_creators) || 0,
+              active_assets: Number(stats.active_assets) || 0,
+            },
+          },
+        });
       }
       default:
         return json({ error: "Unknown action" }, { status: 400 });
