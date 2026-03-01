@@ -152,6 +152,9 @@ export async function action({ request }) {
             }),
           });
           const gqlData = await gqlRes.json();
+          if (gqlData.errors) {
+            console.warn("[OCE] Shopify GraphQL errors:", JSON.stringify(gqlData.errors));
+          }
           for (const edge of (gqlData.data?.products?.edges || [])) {
             const node = edge.node;
             const videoMedia = (node.media?.edges || [])

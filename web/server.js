@@ -535,6 +535,10 @@ app.get("/api/videos", authenticate, async (req, res) => {
       });
       const data = await response.json();
 
+      if (data.errors) {
+        console.warn("[OCE] Shopify GraphQL errors:", JSON.stringify(data.errors));
+      }
+
       for (const edge of (data.data?.products?.edges || [])) {
         const node = edge.node;
         const videoMedia = (node.media?.edges || [])
@@ -1067,7 +1071,7 @@ function renderAssetTable(){
     var skus=v.skus&&v.skus.length?v.skus.map(function(s){return '<span class="sku-tag">'+s+'</span>'}).join(""):'<span style="color:#6d7175;font-size:12px">&mdash;</span>';
     var expCount=v.exposureCount?'<strong>'+v.exposureCount.toLocaleString()+'</strong>':'<span style="color:#6d7175">0</span>';
     var status=v.registered?'<span class="badge b-ok">Registered</span>'+(v.registeredCreatorName?' <span style="font-size:11px;color:#6d7175">'+v.registeredCreatorName+'</span>':""):'<span class="badge b-info">Not registered</span>';
-    var aid=v.assetId.replace(/'/g,"");
+    var aid=v.assetId.replace(/'/g,"\\\\'");
     var action=v.registered?'<button class="btn btn-s btn-sm" onclick="registerSingle(\\''+aid+'\\')">Update</button>':'<button class="btn btn-p btn-sm" onclick="registerSingle(\\''+aid+'\\')">Register</button>';
     var checked=selectedAssets.has(v.assetId)?"checked":"";
     return '<tr data-id="'+v.assetId+'"><td><input type="checkbox" '+checked+' onchange="toggleAssetSelect(\\''+aid+'\\',this.checked)" /></td><td><strong>'+title+'</strong><br><span style="font-size:11px;color:#6d7175">'+v.assetId+'</span><br>'+sourceUrl+'</td><td>'+v.platform+' '+srcBadge(v.discoveredBy)+'</td><td><div class="sku-tags">'+skus+'</div></td><td>'+expCount+'</td><td>'+status+'</td><td>'+action+'</td></tr>';
