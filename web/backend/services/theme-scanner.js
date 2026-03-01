@@ -183,7 +183,9 @@ function parseLiquidFile(key, content, videos, foundIds) {
   }
 
   // 2. video_tag Liquid filter — section renders a Shopify video
-  if (content.includes("video_tag")) {
+  //    Only match sections/ and blocks/ to avoid false positives from
+  //    helper snippets (e.g. product-media.liquid) and templates.
+  if (content.includes("video_tag") && (key.startsWith("sections/") || key.startsWith("blocks/"))) {
     const sectionName = key
       .replace(/\.liquid$/, "")
       .replace(/^(sections|blocks)\//, "");
