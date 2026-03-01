@@ -572,40 +572,69 @@ app.get("/api/videos", authenticate, async (req, res) => {
       console.warn("[OCE] Failed to fetch Shopify video media:", err.message);
     }
 
-    // Source 3: Scan storefront pages for OCE-tagged video elements (custom Liquid)
-    let storefrontVideos = [];
+    // Source 3: Scan theme Liquid files for data-oce-asset-id (custom video embeds)
+    let themeVideos = [];
     try {
-      const storeRes = await fetch(`https://${req.shop}`, {
-        redirect: "follow",
-        headers: { "User-Agent": "Shopify-App-OCE/1.0" },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (storeRes.ok) {
-        const html = await storeRes.text();
-        const tagRegex = /<[^>]+data-oce-asset-id=["']([^"']+)["'][^>]*>/g;
-        let tagMatch;
+      const shopApi = `https://${req.shop}/admin/api/2024-10`;
+      const adminHeaders = { "X-Shopify-Access-Token": req.session.accessToken };
+
+      // Find the main/published theme
+      const themesRes = await fetch(`${shopApi}/themes.json`, { headers: adminHeaders });
+      const themesData = await themesRes.json();
+      const mainTheme = (themesData.themes || []).find(t => t.role === "main");
+
+      if (mainTheme) {
+        // List all assets in the theme
+        const assetsRes = await fetch(`${shopApi}/themes/${mainTheme.id}/assets.json`, { headers: adminHeaders });
+        const assetsData = await assetsRes.json();
+        const liquidFiles = (assetsData.assets || [])
+          .map(a => a.key)
+          .filter(k => k.endsWith(".liquid") && (
+            k.startsWith("sections/") || k.startsWith("blocks/") ||
+            k.startsWith("snippets/") || k.startsWith("templates/")
+          ));
+
+        // Read each file and scan for data-oce-asset-id
         const foundIds = new Set();
-        while ((tagMatch = tagRegex.exec(html)) !== null) {
-          const assetId = tagMatch[1];
-          if (foundIds.has(assetId)) continue;
-          foundIds.add(assetId);
-          const tag = tagMatch[0];
-          const skuMatch = tag.match(/data-oce-sku=["']([^"']+)["']/);
-          storefrontVideos.push({
-            assetId,
-            title: assetId,
-            source: null,
-            thumbnail: null,
-            platform: "HTML5",
-            skus: skuMatch ? [skuMatch[1]] : [],
-            exposureCount: 0,
-            lastSeen: null,
-            discoveredBy: "storefront",
-          });
+        const tagRegex = /data-oce-asset-id=["']([^"']+)["']/g;
+        const skuRegex = /data-oce-sku=["']([^"']+)["']/;
+
+        // Fetch files in batches of 5 to avoid rate limits
+        for (let i = 0; i < liquidFiles.length; i += 5) {
+          const batch = liquidFiles.slice(i, i + 5);
+          const fetches = batch.map(key =>
+            fetch(`${shopApi}/themes/${mainTheme.id}/assets.json?asset[key]=${encodeURIComponent(key)}`, { headers: adminHeaders })
+              .then(r => r.json())
+              .catch(() => null)
+          );
+          const results = await Promise.all(fetches);
+          for (const result of results) {
+            const content = result?.asset?.value;
+            if (!content) continue;
+            let match;
+            tagRegex.lastIndex = 0;
+            while ((match = tagRegex.exec(content)) !== null) {
+              const assetId = match[1];
+              if (foundIds.has(assetId)) continue;
+              foundIds.add(assetId);
+              const skuMatch = content.match(new RegExp(`data-oce-asset-id=["']${assetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*data-oce-sku=["']([^"']+)["']`));
+              themeVideos.push({
+                assetId,
+                title: assetId,
+                source: null,
+                thumbnail: null,
+                platform: "HTML5",
+                skus: skuMatch ? [skuMatch[1]] : [],
+                exposureCount: 0,
+                lastSeen: null,
+                discoveredBy: "theme",
+              });
+            }
+          }
         }
       }
     } catch (err) {
-      console.warn("[OCE] Failed to scan storefront:", err.message);
+      console.warn("[OCE] Failed to scan theme files:", err.message);
     }
 
     // Get registered assets to mark status
@@ -619,8 +648,8 @@ app.get("/api/videos", authenticate, async (req, res) => {
     for (const sv of shopifyVideos) {
       if (!seenIds.has(sv.assetId)) { allVideos.push(sv); seenIds.add(sv.assetId); }
     }
-    for (const sfv of storefrontVideos) {
-      if (!seenIds.has(sfv.assetId)) { allVideos.push(sfv); seenIds.add(sfv.assetId); }
+    for (const tv of themeVideos) {
+      if (!seenIds.has(tv.assetId)) { allVideos.push(tv); seenIds.add(tv.assetId); }
     }
 
     // Also include previously registered assets not found in any source
@@ -651,7 +680,7 @@ app.get("/api/videos", authenticate, async (req, res) => {
 
     console.log("[OCE] GET /api/videos:", allVideos.length, "videos (" +
       oceVideos.length + " SDK, " + shopifyVideos.length + " Shopify media, " +
-      storefrontVideos.length + " storefront, " + registered.length + " registered)");
+      themeVideos.length + " theme, " + registered.length + " registered)");
     res.json({ ok: true, videos: allVideos });
   } catch (err) {
     console.error("[OCE] GET /api/videos error:", err);
@@ -1125,7 +1154,7 @@ function renderCreatorDropdown(){
 }
 
 function srcBadge(src){
-  var map={sdk:["b-ok","SDK Tracked"],shopify:["b-info","Shopify Media"],storefront:["b-ok","Storefront"],manual:["b-info","Manual"],registered:["b-warn","Previously Registered"]};
+  var map={sdk:["b-ok","SDK Tracked"],shopify:["b-info","Shopify Media"],theme:["b-ok","Theme"],manual:["b-info","Manual"],registered:["b-warn","Previously Registered"]};
   var m=map[src]||["b-info",src];
   return '<span class="badge '+m[0]+'">'+m[1]+'</span>';
 }

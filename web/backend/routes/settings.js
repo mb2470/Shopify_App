@@ -391,7 +391,7 @@ export async function registerAssets(shop, assets) {
       };
       if (asset.creator_id) body.creator_id = asset.creator_id;
       if (asset.creator_name) body.creator_name = asset.creator_name;
-      const result = await oceApi.request("POST", "/assets-upsert", body);
+      const result = await oceApi.upsertAssets([body]);
       results.push({ asset_id: asset.asset_id, ok: true, result });
 
       // Store in local DB
@@ -418,8 +418,9 @@ export async function registerAssets(shop, assets) {
         },
       });
     } catch (err) {
-      console.error("[OCE] Asset registration failed for", asset.asset_id, ":", err.message);
-      results.push({ asset_id: asset.asset_id, ok: false, error: err.message });
+      const detail = err.responseBody || "";
+      console.error("[OCE] Asset registration failed for", asset.asset_id, ":", err.message, detail);
+      results.push({ asset_id: asset.asset_id, ok: false, error: err.message + (detail ? " — " + detail : "") });
     }
   }
 
