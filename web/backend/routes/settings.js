@@ -439,8 +439,62 @@ export async function getRegisteredAssets(shop) {
   });
 }
 
+/**
+ * Discover videos tracked by the OCE SDK via the events.list management API.
+ * Extracts unique asset_ids from exposure events and aggregates metadata.
+ */
+export async function getDiscoveredVideos(shop) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured", videos: [] };
+  }
+  const oceApi = new OceApiService(settings.apiKey);
+
+  try {
+    const result = await oceApi.manage("events.list", { limit: 500 });
+    const rawData = result?.data;
+    // events.list may return { events: [...] } or an array directly
+    const events = Array.isArray(rawData) ? rawData : (rawData?.events || rawData?.items || []);
+
+    // Aggregate unique asset_ids from events
+    const assetMap = {};
+    for (const event of (Array.isArray(events) ? events : [])) {
+      const aid = event.asset_id || event.assetId;
+      if (!aid) continue;
+      if (!assetMap[aid]) {
+        assetMap[aid] = {
+          assetId: aid,
+          title: event.asset_title || event.title || null,
+          skus: new Set(),
+          exposureCount: 0,
+          source: event.source_url || event.video_url || event.source || null,
+          thumbnail: event.thumbnail_url || event.thumbnail || null,
+          lastSeen: null,
+        };
+      }
+      assetMap[aid].exposureCount++;
+      if (event.sku) assetMap[aid].skus.add(event.sku);
+      const ts = event.created_at || event.ts || event.timestamp;
+      if (ts && (!assetMap[aid].lastSeen || ts > assetMap[aid].lastSeen)) {
+        assetMap[aid].lastSeen = ts;
+      }
+    }
+
+    const videos = Object.values(assetMap).map(v => ({
+      ...v,
+      skus: Array.from(v.skus),
+    }));
+
+    console.log("[OCE] getDiscoveredVideos:", videos.length, "unique videos from", events.length, "events");
+    return { ok: true, videos };
+  } catch (err) {
+    console.error("[OCE] getDiscoveredVideos error:", err.message);
+    return { ok: false, error: err.message, videos: [] };
+  }
+}
+
 export default {
   getSettings, updateSettings, updateApiKey, getIntegrationStatus,
   syncAppMetafields, getAppMetafields, getStatsOverview,
-  getCreators, registerAssets, getRegisteredAssets,
+  getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos,
 };
