@@ -354,4 +354,93 @@ export async function getStatsOverview(shop, periodDays = 30) {
   return oceApi.getStats(periodDays);
 }
 
-export default { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getAppMetafields, getStatsOverview };
+/**
+ * GET /api/creators
+ * Fetch creators from OCE via the management API
+ */
+export async function getCreators(shop) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured", creators: [] };
+  }
+  const oceApi = new OceApiService(settings.apiKey);
+  const result = await oceApi.manage("creators.list", {});
+  const creators = result?.data?.creators || result?.data || [];
+  return { ok: true, creators: Array.isArray(creators) ? creators : [] };
+}
+
+/**
+ * POST /api/assets/register
+ * Register one or more assets with OCE and store locally
+ */
+export async function registerAssets(shop, assets) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured" };
+  }
+  const oceApi = new OceApiService(settings.apiKey);
+
+  const results = [];
+  for (const asset of assets) {
+    try {
+      // Send each asset individually (matches the /assets-upsert API format)
+      const result = await oceApi.request("POST", "/assets-upsert", {
+        asset_id: asset.asset_id,
+        title: asset.title,
+        creator_id: asset.creator_id || undefined,
+        skus: asset.skus || [],
+        thumbnail_url: asset.thumbnail_url || undefined,
+        source: asset.source || undefined,
+        metadata: asset.metadata || {},
+      });
+      results.push({ asset_id: asset.asset_id, ok: true, result });
+
+      // Store in local DB
+      await prisma.videoAsset.upsert({
+        where: { shop_assetId: { shop, assetId: asset.asset_id } },
+        create: {
+          shop,
+          assetId: asset.asset_id,
+          title: asset.title,
+          creatorName: asset.creator_name,
+          creatorId: asset.creator_id,
+          skus: JSON.stringify(asset.skus || []),
+          videoUrl: asset.source,
+          platform: "shopify",
+          isActive: true,
+        },
+        update: {
+          title: asset.title,
+          creatorName: asset.creator_name,
+          creatorId: asset.creator_id,
+          skus: JSON.stringify(asset.skus || []),
+          videoUrl: asset.source,
+          isActive: true,
+        },
+      });
+    } catch (err) {
+      console.error("[OCE] Asset registration failed for", asset.asset_id, ":", err.message);
+      results.push({ asset_id: asset.asset_id, ok: false, error: err.message });
+    }
+  }
+
+  const succeeded = results.filter(r => r.ok).length;
+  const failed = results.filter(r => !r.ok).length;
+  return { ok: failed === 0, results, succeeded, failed };
+}
+
+/**
+ * Get registered assets for a shop from local DB
+ */
+export async function getRegisteredAssets(shop) {
+  return prisma.videoAsset.findMany({
+    where: { shop, isActive: true },
+    orderBy: { updatedAt: "desc" },
+  });
+}
+
+export default {
+  getSettings, updateSettings, updateApiKey, getIntegrationStatus,
+  syncAppMetafields, getAppMetafields, getStatsOverview,
+  getCreators, registerAssets, getRegisteredAssets,
+};
