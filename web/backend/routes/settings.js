@@ -391,7 +391,7 @@ export async function registerAssets(shop, assets) {
       };
       if (asset.creator_id) body.creator_id = asset.creator_id;
       if (asset.creator_name) body.creator_name = asset.creator_name;
-      const result = await oceApi.request("POST", "/assets-upsert", body);
+      const result = await oceApi.upsertAssets([body]);
       results.push({ asset_id: asset.asset_id, ok: true, result });
 
       // Store in local DB
