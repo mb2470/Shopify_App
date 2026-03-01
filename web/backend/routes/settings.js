@@ -418,8 +418,9 @@ export async function registerAssets(shop, assets) {
         },
       });
     } catch (err) {
-      console.error("[OCE] Asset registration failed for", asset.asset_id, ":", err.message);
-      results.push({ asset_id: asset.asset_id, ok: false, error: err.message });
+      const detail = err.responseBody || "";
+      console.error("[OCE] Asset registration failed for", asset.asset_id, ":", err.message, detail);
+      results.push({ asset_id: asset.asset_id, ok: false, error: err.message + (detail ? " — " + detail : "") });
     }
   }
 

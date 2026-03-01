@@ -6,7 +6,7 @@ application_url = "https://shopify-app-q4bw.onrender.com"
 embedded = true
 
 [access_scopes]
-scopes = "read_orders,write_orders,read_customers,read_products,read_script_tags,write_script_tags"
+scopes = "read_orders,write_orders,read_customers,read_products,read_script_tags,write_script_tags,read_themes"
 
 [auth]
 redirect_urls = [
