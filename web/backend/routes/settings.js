@@ -383,16 +383,15 @@ export async function registerAssets(shop, assets) {
   const results = [];
   for (const asset of assets) {
     try {
-      // Send each asset individually (matches the /assets-upsert API format)
-      const result = await oceApi.request("POST", "/assets-upsert", {
+      // Send only fields the OCE /assets-upsert API accepts
+      const body = {
         asset_id: asset.asset_id,
         title: asset.title,
-        creator_id: asset.creator_id || undefined,
         skus: asset.skus || [],
-        thumbnail_url: asset.thumbnail_url || undefined,
-        source: asset.source || undefined,
-        metadata: asset.metadata || {},
-      });
+      };
+      if (asset.creator_id) body.creator_id = asset.creator_id;
+      if (asset.creator_name) body.creator_name = asset.creator_name;
+      const result = await oceApi.request("POST", "/assets-upsert", body);
       results.push({ asset_id: asset.asset_id, ok: true, result });
 
       // Store in local DB
@@ -406,7 +405,7 @@ export async function registerAssets(shop, assets) {
           creatorId: asset.creator_id,
           skus: JSON.stringify(asset.skus || []),
           videoUrl: asset.source,
-          platform: "shopify",
+          platform: asset.metadata?.platform || "shopify",
           isActive: true,
         },
         update: {

@@ -572,21 +572,60 @@ app.get("/api/videos", authenticate, async (req, res) => {
       console.warn("[OCE] Failed to fetch Shopify video media:", err.message);
     }
 
+    // Source 3: Scan storefront pages for OCE-tagged video elements (custom Liquid)
+    let storefrontVideos = [];
+    try {
+      const storeRes = await fetch(`https://${req.shop}`, {
+        redirect: "follow",
+        headers: { "User-Agent": "Shopify-App-OCE/1.0" },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (storeRes.ok) {
+        const html = await storeRes.text();
+        const tagRegex = /<[^>]+data-oce-asset-id=["']([^"']+)["'][^>]*>/g;
+        let tagMatch;
+        const foundIds = new Set();
+        while ((tagMatch = tagRegex.exec(html)) !== null) {
+          const assetId = tagMatch[1];
+          if (foundIds.has(assetId)) continue;
+          foundIds.add(assetId);
+          const tag = tagMatch[0];
+          const skuMatch = tag.match(/data-oce-sku=["']([^"']+)["']/);
+          storefrontVideos.push({
+            assetId,
+            title: assetId,
+            source: null,
+            thumbnail: null,
+            platform: "HTML5",
+            skus: skuMatch ? [skuMatch[1]] : [],
+            exposureCount: 0,
+            lastSeen: null,
+            discoveredBy: "storefront",
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[OCE] Failed to scan storefront:", err.message);
+    }
+
     // Get registered assets to mark status
     const registered = await getRegisteredAssets(req.shop);
     const registeredMap = {};
     for (const ra of registered) registeredMap[ra.assetId] = ra;
 
-    // Merge: OCE SDK videos first, then Shopify video media not already seen
+    // Merge: OCE SDK videos first, then Shopify media, then storefront-scanned
     const seenIds = new Set(oceVideos.map(v => v.assetId));
-    const allVideos = [
-      ...oceVideos,
-      ...shopifyVideos.filter(v => !seenIds.has(v.assetId)),
-    ];
+    const allVideos = [...oceVideos];
+    for (const sv of shopifyVideos) {
+      if (!seenIds.has(sv.assetId)) { allVideos.push(sv); seenIds.add(sv.assetId); }
+    }
+    for (const sfv of storefrontVideos) {
+      if (!seenIds.has(sfv.assetId)) { allVideos.push(sfv); seenIds.add(sfv.assetId); }
+    }
 
-    // Also include previously registered assets not found in either source
+    // Also include previously registered assets not found in any source
     for (const ra of registered) {
-      if (!seenIds.has(ra.assetId) && !shopifyVideos.find(v => v.assetId === ra.assetId)) {
+      if (!seenIds.has(ra.assetId)) {
         allVideos.push({
           assetId: ra.assetId,
           title: ra.title || ra.assetId,
@@ -598,6 +637,7 @@ app.get("/api/videos", authenticate, async (req, res) => {
           lastSeen: null,
           discoveredBy: "registered",
         });
+        seenIds.add(ra.assetId);
       }
     }
 
@@ -611,7 +651,7 @@ app.get("/api/videos", authenticate, async (req, res) => {
 
     console.log("[OCE] GET /api/videos:", allVideos.length, "videos (" +
       oceVideos.length + " SDK, " + shopifyVideos.length + " Shopify media, " +
-      registered.length + " registered)");
+      storefrontVideos.length + " storefront, " + registered.length + " registered)");
     res.json({ ok: true, videos: allVideos });
   } catch (err) {
     console.error("[OCE] GET /api/videos error:", err);
@@ -831,6 +871,35 @@ function getAdminHTML(shop, host) {
           <p style="font-size:14px;font-weight:500;margin-bottom:8px">No videos discovered yet</p>
           <p>Make sure the OCE SDK is enabled and your storefront has video content.<br>The SDK auto-detects Videowise, Tolstoy, Firework, YouTube, Vimeo, and HTML5 video players.</p>
         </div>
+        <div style="margin-top:16px;border-top:1px solid #e1e3e5;padding-top:16px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer" onclick="document.getElementById('manual-form').style.display=document.getElementById('manual-form').style.display==='none'?'block':'none';this.querySelector('span').textContent=document.getElementById('manual-form').style.display==='none'?'\\u25BE':'\\u25B4'">
+            <strong style="font-size:14px">+ Add Video Manually</strong><span style="font-size:12px">\\u25BE</span>
+          </div>
+          <div id="manual-form" style="display:none;background:#f9fafb;border:1px solid #e1e3e5;border-radius:8px;padding:16px">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+              <div>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Asset ID <span style="color:#d72c0d">*</span></label>
+                <input type="text" id="manual-asset-id" placeholder="e.g. my-video-001" style="width:100%;padding:8px;border:1px solid #c9cccf;border-radius:6px;font-size:13px" />
+              </div>
+              <div>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Title</label>
+                <input type="text" id="manual-title" placeholder="e.g. Product Demo Video" style="width:100%;padding:8px;border:1px solid #c9cccf;border-radius:6px;font-size:13px" />
+              </div>
+              <div>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">SKUs <span style="font-weight:400;color:#6d7175">(comma-separated)</span></label>
+                <input type="text" id="manual-skus" placeholder="e.g. SKU-001, SKU-002" style="width:100%;padding:8px;border:1px solid #c9cccf;border-radius:6px;font-size:13px" />
+              </div>
+              <div>
+                <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Creator</label>
+                <select id="manual-creator-select" style="width:100%;padding:8px;border:1px solid #c9cccf;border-radius:6px;font-size:13px;background:#fff"><option value="">-- Use creator from above --</option></select>
+              </div>
+            </div>
+            <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+              <button class="btn btn-p btn-sm" onclick="manualRegister()">Register</button>
+              <span id="manual-error" style="display:none;color:#d72c0d;font-size:12px"></span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -1043,16 +1112,20 @@ async function loadAssetData(){
 
 function renderCreatorDropdown(){
   var sel=document.getElementById("creator-select");
+  var manSel=document.getElementById("manual-creator-select");
   sel.innerHTML='<option value="">-- Select a creator --</option>';
+  manSel.innerHTML='<option value="">-- Use creator from above --</option>';
   assetCreators.forEach(function(c){
     var id=c.id||c.external_id||c.creator_id||"";
     var name=c.name||c.display_name||c.external_id||id;
-    sel.innerHTML+='<option value="'+id+'" data-name="'+name.replace(/"/g,"&quot;")+'">'+name+'</option>';
+    var opt='<option value="'+id+'" data-name="'+name.replace(/"/g,"&quot;")+'">'+name+'</option>';
+    sel.innerHTML+=opt;
+    manSel.innerHTML+=opt;
   });
 }
 
 function srcBadge(src){
-  var map={sdk:["b-ok","SDK Tracked"],shopify:["b-info","Shopify Media"],registered:["b-warn","Previously Registered"]};
+  var map={sdk:["b-ok","SDK Tracked"],shopify:["b-info","Shopify Media"],storefront:["b-ok","Storefront"],manual:["b-info","Manual"],registered:["b-warn","Previously Registered"]};
   var m=map[src]||["b-info",src];
   return '<span class="badge '+m[0]+'">'+m[1]+'</span>';
 }
@@ -1153,6 +1226,26 @@ async function doRegister(videos,creator){
   }catch(e){
     document.getElementById("assets-error").textContent="Error: "+e.message;
     document.getElementById("assets-error").style.display="block";
+  }
+}
+
+async function manualRegister(){
+  var errEl=document.getElementById("manual-error");
+  errEl.style.display="none";
+  var assetId=document.getElementById("manual-asset-id").value.trim();
+  if(!assetId){errEl.textContent="Asset ID is required";errEl.style.display="inline";return}
+  var title=document.getElementById("manual-title").value.trim()||assetId;
+  var skusRaw=document.getElementById("manual-skus").value.trim();
+  var skus=skusRaw?skusRaw.split(",").map(function(s){return s.trim()}).filter(Boolean):[];
+  var manSel=document.getElementById("manual-creator-select");
+  var manOpt=manSel.options[manSel.selectedIndex];
+  var creator=manSel.value?{id:manSel.value,name:manOpt?manOpt.getAttribute("data-name"):""}:getSelectedCreator();
+  var video={assetId:assetId,title:title,skus:skus,platform:"Manual",discoveredBy:"manual"};
+  await doRegister([video],creator);
+  if(document.getElementById("assets-success").style.display==="block"){
+    document.getElementById("manual-asset-id").value="";
+    document.getElementById("manual-title").value="";
+    document.getElementById("manual-skus").value="";
   }
 }
 
