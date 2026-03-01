@@ -374,7 +374,7 @@ export default function OceDashboard() {
       subtitle="Track creator video engagement and attribute conversions"
       primaryAction={{
         content: "View OCE Dashboard",
-        url: "https://app.onsiteaffiliate.com",
+        url: "https://app.onsiteaffiliate.com/dashboard",
         external: true,
       }}
     >
@@ -500,7 +500,7 @@ export default function OceDashboard() {
                 title="Create an OCE Account"
                 description="Sign up at app.onsiteaffiliate.com"
                 done={false}
-                link="https://app.onsiteaffiliate.com/signup"
+                link="https://app.onsiteaffiliate.com/auth"
               />
               <ChecklistItem
                 number={2}
@@ -517,10 +517,16 @@ export default function OceDashboard() {
               />
               <ChecklistItem
                 number={4}
-                title="Register Video Assets"
-                description="Map your creator videos to products in the OCE dashboard"
+                title="Configure Attribution"
+                description="Set commission rates, window, and events"
                 done={false}
-                link="https://app.onsiteaffiliate.com/assets"
+                link="https://app.onsiteaffiliate.com/dashboard/settings"
+              />
+              <ChecklistItem
+                number={5}
+                title="Register Video Assets"
+                description="Use the Asset Registration section below to register products"
+                done={false}
               />
             </BlockStack>
           </Card>

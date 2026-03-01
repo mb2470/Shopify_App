@@ -682,7 +682,7 @@ function getAdminHTML(shop, host) {
   <div id="eb" class="banner banner-err"></div>
 
   <div class="header"><div><h1>Onsite Commission Engine</h1><p>Track creator video engagement and attribute conversions</p></div>
-    <a href="https://app.onsiteaffiliate.com" target="_blank" class="btn btn-p">View OCE Dashboard ↗</a></div>
+    <a href="https://app.onsiteaffiliate.com/dashboard" target="_blank" class="btn btn-p">View OCE Dashboard ↗</a></div>
 
   <div class="card"><div class="card-row"><h2>Integration Status</h2><span id="ob" class="badge b-info">Loading...</span></div>
     <div class="grid-3">
@@ -702,11 +702,11 @@ function getAdminHTML(shop, host) {
   </div>
 
   <div class="card" id="qs"><h2>Quick Start</h2><hr>
-    <div class="cl-item"><div class="cl-n">1</div><div class="cl-c"><h4>Create an OCE Account</h4><p><a href="https://app.onsiteaffiliate.com/signup" target="_blank">Sign up at app.onsiteaffiliate.com</a></p></div></div>
+    <div class="cl-item"><div class="cl-n">1</div><div class="cl-c"><h4>Create an OCE Account</h4><p><a href="https://app.onsiteaffiliate.com/auth" target="_blank">Sign up at app.onsiteaffiliate.com</a></p></div></div>
     <div class="cl-item"><div class="cl-n">2</div><div class="cl-c"><h4>Generate an API Key</h4><p>Settings → API Keys in OCE dashboard</p></div></div>
     <div class="cl-item"><div class="cl-n">3</div><div class="cl-c"><h4>Paste Your Key Above</h4><p>Enter your API key to connect</p></div></div>
-    <div class="cl-item"><div class="cl-n">4</div><div class="cl-c"><h4>Configure Attribution</h4><p>Set commission rates, window, and events</p></div></div>
-    <div class="cl-item"><div class="cl-n">5</div><div class="cl-c"><h4>Register Video Assets</h4><p><a href="https://app.onsiteaffiliate.com/assets" target="_blank">Map videos to products</a></p></div></div>
+    <div class="cl-item"><div class="cl-n">4</div><div class="cl-c"><h4>Configure Attribution</h4><p><a href="https://app.onsiteaffiliate.com/dashboard/settings" target="_blank">Set commission rates, window, and events</a></p></div></div>
+    <div class="cl-item"><div class="cl-n">5</div><div class="cl-c"><h4>Register Video Assets</h4><p>Use the Asset Registration section below to register products</p></div></div>
   </div>
 
   <div class="grid-2">
@@ -1006,9 +1006,9 @@ function renderAssetTable(){
     var img=p.image?'<img class="asset-img" src="'+p.image+'" alt="" />':'<div class="asset-img" style="display:flex;align-items:center;justify-content:center;font-size:18px;color:#6d7175">&#128247;</div>';
     var skus=p.skus.length?p.skus.map(function(s){return '<span class="sku-tag">'+s+'</span>'}).join(""):'<span style="color:#6d7175;font-size:12px">No SKUs</span>';
     var status=p.registered?'<span class="badge b-ok">Registered</span>'+(p.registeredCreatorName?' <span style="font-size:11px;color:#6d7175">'+p.registeredCreatorName+'</span>':""):'<span class="badge b-info">Not registered</span>';
-    var action=p.registered?'<button class="btn btn-s btn-sm" onclick="registerSingle(\''+p.numericId+'\')">Update</button>':'<button class="btn btn-p btn-sm" onclick="registerSingle(\''+p.numericId+'\')">Register</button>';
+    var action=p.registered?'<button class="btn btn-s btn-sm" onclick="registerSingle(\\''+p.numericId+'\\')">Update</button>':'<button class="btn btn-p btn-sm" onclick="registerSingle(\\''+p.numericId+'\\')">Register</button>';
     var checked=selectedAssets.has(p.numericId)?"checked":"";
-    return '<tr data-id="'+p.numericId+'"><td><input type="checkbox" '+checked+' onchange="toggleAssetSelect(\''+p.numericId+'\',this.checked)" /></td><td>'+img+'</td><td><strong>'+p.title+'</strong><br><span style="font-size:11px;color:#6d7175">'+p.assetId+'</span></td><td><div class="sku-tags">'+skus+'</div></td><td>'+status+'</td><td>'+action+'</td></tr>';
+    return '<tr data-id="'+p.numericId+'"><td><input type="checkbox" '+checked+' onchange="toggleAssetSelect(\\''+p.numericId+'\\',this.checked)" /></td><td>'+img+'</td><td><strong>'+p.title+'</strong><br><span style="font-size:11px;color:#6d7175">'+p.assetId+'</span></td><td><div class="sku-tags">'+skus+'</div></td><td>'+status+'</td><td>'+action+'</td></tr>';
   }).join("");
   updateBulkBtn();
 }
