@@ -439,16 +439,16 @@ app.get("/api/stats", authenticate, async (req, res) => {
     console.log("[OCE] GET /api/stats raw response:", JSON.stringify(result));
 
     // Normalize: the stats may be at result.data or at the top level
+    // OCE Management API returns camelCase field names
     const stats = result?.data || result || {};
     res.json({
       ok: result?.ok !== false,
       data: {
-        total_exposures: Number(stats.total_exposures) || 0,
-        total_orders: Number(stats.total_orders) || 0,
-        total_revenue: Number(stats.total_revenue) || 0,
-        total_commission: Number(stats.total_commission) || 0,
-        active_creators: Number(stats.active_creators) || 0,
-        active_assets: Number(stats.active_assets) || 0,
+        total_exposures: Number(stats.totalExposures ?? stats.total_exposures) || 0,
+        total_orders: Number(stats.totalOrders ?? stats.total_orders) || 0,
+        total_revenue: Number(stats.totalRevenue ?? stats.total_revenue) || 0,
+        total_commission: Number(stats.totalCommission ?? stats.total_commission) || 0,
+        chart_data: stats.chartData || stats.chart_data || [],
       },
     });
   } catch (err) {

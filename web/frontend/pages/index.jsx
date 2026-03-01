@@ -80,17 +80,17 @@ export async function action({ request }) {
         const periodDays = parseInt(formData.get("periodDays")) || 30;
         const result = await getStatsOverview(shop, periodDays);
         console.log("[OCE] Remix stats raw response:", JSON.stringify(result));
+        // OCE Management API returns camelCase field names
         const stats = result?.data || result || {};
         return json({
           statsResult: {
             ok: result?.ok !== false,
             data: {
-              total_exposures: Number(stats.total_exposures) || 0,
-              total_orders: Number(stats.total_orders) || 0,
-              total_revenue: Number(stats.total_revenue) || 0,
-              total_commission: Number(stats.total_commission) || 0,
-              active_creators: Number(stats.active_creators) || 0,
-              active_assets: Number(stats.active_assets) || 0,
+              total_exposures: Number(stats.totalExposures ?? stats.total_exposures) || 0,
+              total_orders: Number(stats.totalOrders ?? stats.total_orders) || 0,
+              total_revenue: Number(stats.totalRevenue ?? stats.total_revenue) || 0,
+              total_commission: Number(stats.totalCommission ?? stats.total_commission) || 0,
+              chart_data: stats.chartData || stats.chart_data || [],
             },
           },
         });
@@ -483,7 +483,7 @@ export default function OceDashboard() {
                   </Box>
                 )}
                 {statsData?.ok && statsData.data && !statsLoading && (
-                  <InlineGrid columns={3} gap="400">
+                  <InlineGrid columns={4} gap="400">
                     <Box padding="300" background="bg-surface-secondary" borderRadius="200">
                       <BlockStack gap="200">
                         <Text variant="headingSm">Total Exposures</Text>
@@ -506,18 +506,6 @@ export default function OceDashboard() {
                       <BlockStack gap="200">
                         <Text variant="headingSm">Total Commission</Text>
                         <Text variant="headingLg">${statsData.data.total_commission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                      </BlockStack>
-                    </Box>
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Active Creators</Text>
-                        <Text variant="headingLg">{statsData.data.active_creators.toLocaleString()}</Text>
-                      </BlockStack>
-                    </Box>
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Active Assets</Text>
-                        <Text variant="headingLg">{statsData.data.active_assets.toLocaleString()}</Text>
                       </BlockStack>
                     </Box>
                   </InlineGrid>
