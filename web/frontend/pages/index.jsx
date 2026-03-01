@@ -41,6 +41,7 @@ import {
 import { useLoaderData, useSubmit, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import { json } from "@remix-run/node";
 import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos } from "../backend/routes/settings.js";
+import { scanThemeForVideos } from "../backend/services/theme-scanner.js";
 import shopify from "../server.js";
 
 // ─── Remix Loader / Action ────────────────────────────────────────
@@ -178,56 +179,10 @@ export async function action({ request }) {
           console.warn("[OCE] Failed to fetch Shopify video media:", err.message);
         }
 
-        // Source 3: Scan theme Liquid files for data-oce-asset-id (custom video embeds)
+        // Source 3: Scan theme for videos (Liquid files + JSON template configs)
         let themeVideos = [];
         try {
-          const shopApi = `https://${shop}/admin/api/2024-10`;
-          const adminHeaders = { "X-Shopify-Access-Token": session.accessToken };
-
-          const themesRes = await fetch(`${shopApi}/themes.json`, { headers: adminHeaders });
-          const themesData = await themesRes.json();
-          const mainTheme = (themesData.themes || []).find(t => t.role === "main");
-
-          if (mainTheme) {
-            const assetsRes = await fetch(`${shopApi}/themes/${mainTheme.id}/assets.json`, { headers: adminHeaders });
-            const assetsData = await assetsRes.json();
-            const liquidFiles = (assetsData.assets || [])
-              .map(a => a.key)
-              .filter(k => k.endsWith(".liquid") && (
-                k.startsWith("sections/") || k.startsWith("blocks/") ||
-                k.startsWith("snippets/") || k.startsWith("templates/")
-              ));
-
-            const foundIds = new Set();
-            const tagRegex = /data-oce-asset-id=["']([^"']+)["']/g;
-
-            for (let i = 0; i < liquidFiles.length; i += 5) {
-              const batch = liquidFiles.slice(i, i + 5);
-              const fetches = batch.map(key =>
-                fetch(`${shopApi}/themes/${mainTheme.id}/assets.json?asset[key]=${encodeURIComponent(key)}`, { headers: adminHeaders })
-                  .then(r => r.json())
-                  .catch(() => null)
-              );
-              const results = await Promise.all(fetches);
-              for (const result of results) {
-                const content = result?.asset?.value;
-                if (!content) continue;
-                let match;
-                tagRegex.lastIndex = 0;
-                while ((match = tagRegex.exec(content)) !== null) {
-                  const assetId = match[1];
-                  if (foundIds.has(assetId)) continue;
-                  foundIds.add(assetId);
-                  const skuMatch = content.match(new RegExp(`data-oce-asset-id=["']${assetId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*data-oce-sku=["']([^"']+)["']`));
-                  themeVideos.push({
-                    assetId, title: assetId, source: null, thumbnail: null,
-                    platform: "HTML5", skus: skuMatch ? [skuMatch[1]] : [],
-                    exposureCount: 0, lastSeen: null, discoveredBy: "theme",
-                  });
-                }
-              }
-            }
-          }
+          themeVideos = await scanThemeForVideos(shop, session.accessToken);
         } catch (err) {
           console.warn("[OCE] Failed to scan theme files:", err.message);
         }
