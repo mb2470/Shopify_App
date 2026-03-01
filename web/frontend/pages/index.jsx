@@ -40,7 +40,7 @@ import {
 } from "@shopify/polaris-icons";
 import { useLoaderData, useSubmit, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import { json } from "@remix-run/node";
-import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets } from "../backend/routes/settings.js";
+import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos } from "../backend/routes/settings.js";
 import shopify from "../server.js";
 
 // ─── Remix Loader / Action ────────────────────────────────────────
@@ -98,72 +98,111 @@ export async function action({ request }) {
           },
         });
       }
-      case "fetch-products": {
-        // Fetch products from Shopify + registered assets from DB
-        const graphqlUrl = `https://${shop}/admin/api/2024-10/graphql.json`;
-        const graphqlRes = await fetch(graphqlUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": session.accessToken,
-          },
-          body: JSON.stringify({
-            query: `{
-              products(first: 100, query: "status:active") {
-                edges {
-                  node {
-                    id
-                    title
-                    handle
-                    featuredImage { url altText }
-                    media(first: 10) {
-                      edges {
-                        node {
-                          mediaContentType
-                          ... on Video { id sources { url mimeType } }
-                          ... on ExternalVideo { id originUrl embeddedUrl }
-                        }
-                      }
-                    }
-                    variants(first: 100) {
-                      edges { node { id sku title } }
-                    }
-                  }
+      case "fetch-videos": {
+        // Discover videos from OCE SDK events + Shopify product video media
+        const detectPlatform = (id) => {
+          if (!id) return "Video";
+          const lower = id.toLowerCase();
+          if (lower.startsWith("videowise")) return "Videowise";
+          if (lower.startsWith("tolstoy")) return "Tolstoy";
+          if (lower.startsWith("firework")) return "Firework";
+          if (lower.includes("youtube") || lower.includes("youtu.be")) return "YouTube";
+          if (lower.includes("vimeo")) return "Vimeo";
+          if (lower.startsWith("shopify")) return "Shopify";
+          return "Video";
+        };
+
+        // Source 1: OCE SDK tracked videos
+        let oceVideos = [];
+        try {
+          const discovered = await getDiscoveredVideos(shop);
+          if (discovered.ok) {
+            oceVideos = discovered.videos.map(v => ({
+              ...v, platform: detectPlatform(v.assetId), discoveredBy: "sdk",
+            }));
+          }
+        } catch (err) {
+          console.warn("[OCE] Failed to fetch OCE videos:", err.message);
+        }
+
+        // Source 2: Shopify products with video media
+        let shopifyVideos = [];
+        try {
+          const gqlUrl = `https://${shop}/admin/api/2024-10/graphql.json`;
+          const gqlRes = await fetch(gqlUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Shopify-Access-Token": session.accessToken,
+            },
+            body: JSON.stringify({
+              query: `{
+                products(first: 100, query: "status:active") {
+                  edges { node {
+                    id title handle featuredImage { url }
+                    media(first: 10) { edges { node {
+                      mediaContentType
+                      ... on Video { id sources { url mimeType } }
+                      ... on ExternalVideo { id originUrl embeddedUrl }
+                    } } }
+                    variants(first: 100) { edges { node { sku } } }
+                  } }
                 }
-              }
-            }`,
-          }),
-        });
-        const graphqlData = await graphqlRes.json();
+              }`,
+            }),
+          });
+          const gqlData = await gqlRes.json();
+          if (gqlData.errors) {
+            console.warn("[OCE] Shopify GraphQL errors:", JSON.stringify(gqlData.errors));
+          }
+          for (const edge of (gqlData.data?.products?.edges || [])) {
+            const node = edge.node;
+            const videoMedia = (node.media?.edges || [])
+              .filter(m => m.node.mediaContentType === "VIDEO" || m.node.mediaContentType === "EXTERNAL_VIDEO");
+            if (videoMedia.length === 0) continue;
+            const skus = (node.variants?.edges || []).map(v => v.node.sku).filter(Boolean);
+            for (const vm of videoMedia) {
+              const mn = vm.node;
+              const videoUrl = mn.sources?.[0]?.url || mn.originUrl || mn.embeddedUrl;
+              const mediaId = mn.id.replace(/gid:\/\/shopify\/(Video|ExternalVideo)\//, "");
+              shopifyVideos.push({
+                assetId: `shopify-video-${mediaId}`,
+                title: node.title + (videoMedia.length > 1 ? ` (${mn.mediaContentType === "EXTERNAL_VIDEO" ? "External" : "Hosted"})` : ""),
+                source: videoUrl, thumbnail: node.featuredImage?.url || null,
+                platform: mn.mediaContentType === "EXTERNAL_VIDEO" ? detectPlatform(videoUrl) : "Shopify",
+                skus, exposureCount: 0, lastSeen: null, discoveredBy: "shopify",
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("[OCE] Failed to fetch Shopify video media:", err.message);
+        }
+
+        // Merge + registered status
         const registered = await getRegisteredAssets(shop);
         const registeredMap = {};
         for (const ra of registered) registeredMap[ra.assetId] = ra;
-
-        const products = (graphqlData.data?.products?.edges || []).map(e => {
-          const node = e.node;
-          const numericId = node.id.replace("gid://shopify/Product/", "");
-          const assetId = `shopify-${numericId}`;
-          const variants = (node.variants?.edges || []).map(v => ({
-            id: v.node.id, sku: v.node.sku, title: v.node.title,
-          }));
-          const videos = (node.media?.edges || [])
-            .filter(m => m.node.mediaContentType === "VIDEO" || m.node.mediaContentType === "EXTERNAL_VIDEO")
-            .map(m => ({
-              id: m.node.id,
-              type: m.node.mediaContentType,
-              url: m.node.sources?.[0]?.url || m.node.originUrl || m.node.embeddedUrl,
-            }));
-          const reg = registeredMap[assetId];
-          return {
-            id: node.id, numericId, assetId, title: node.title, handle: node.handle,
-            image: node.featuredImage?.url, videos, variants,
-            skus: variants.map(v => v.sku).filter(Boolean),
-            registered: !!reg,
-            registeredCreatorId: reg?.creatorId || null,
-            registeredCreatorName: reg?.creatorName || null,
-          };
-        });
-        return json({ productsResult: { ok: true, products } });
+        const seenIds = new Set(oceVideos.map(v => v.assetId));
+        const allVideos = [
+          ...oceVideos,
+          ...shopifyVideos.filter(v => !seenIds.has(v.assetId)),
+        ];
+        for (const ra of registered) {
+          if (!seenIds.has(ra.assetId) && !shopifyVideos.find(v => v.assetId === ra.assetId)) {
+            allVideos.push({
+              assetId: ra.assetId, title: ra.title || ra.assetId, source: ra.videoUrl,
+              thumbnail: null, platform: detectPlatform(ra.assetId),
+              skus: JSON.parse(ra.skus || "[]"), exposureCount: 0, lastSeen: null, discoveredBy: "registered",
+            });
+          }
+        }
+        for (const v of allVideos) {
+          const reg = registeredMap[v.assetId];
+          v.registered = !!reg;
+          v.registeredCreatorId = reg?.creatorId || null;
+          v.registeredCreatorName = reg?.creatorName || null;
+        }
+        return json({ videosResult: { ok: true, videos: allVideos } });
       }
       case "fetch-creators": {
         const creatorsResult = await getCreators(shop);
@@ -209,27 +248,27 @@ export default function OceDashboard() {
   const statsData = statsFetcher.data?.statsResult;
   const statsLoading = statsFetcher.state === "submitting";
 
-  // ─── Assets State ──────────────────────────────────────────
+  // ─── Video Assets State ────────────────────────────────────
   const [assetsOpen, setAssetsOpen] = useState(false);
-  const [products, setProducts] = useState([]);
+  const [videos, setVideos] = useState([]);
   const [creators, setCreators] = useState([]);
   const [selectedCreator, setSelectedCreator] = useState("");
   const [selectedAssetIds, setSelectedAssetIds] = useState([]);
   const [assetsLoaded, setAssetsLoaded] = useState(false);
   const [assetsBanner, setAssetsBanner] = useState(null);
-  const productsFetcher = useFetcher();
+  const videosFetcher = useFetcher();
   const creatorsFetcher = useFetcher();
   const registerFetcher = useFetcher();
-  const assetsLoading = productsFetcher.state === "submitting" || creatorsFetcher.state === "submitting";
+  const assetsLoading = videosFetcher.state === "submitting" || creatorsFetcher.state === "submitting";
   const registering = registerFetcher.state === "submitting";
 
   // Process fetcher responses
   useEffect(() => {
-    if (productsFetcher.data?.productsResult?.ok) {
-      setProducts(productsFetcher.data.productsResult.products);
+    if (videosFetcher.data?.videosResult?.ok) {
+      setVideos(videosFetcher.data.videosResult.videos);
       setAssetsLoaded(true);
     }
-  }, [productsFetcher.data]);
+  }, [videosFetcher.data]);
 
   useEffect(() => {
     if (creatorsFetcher.data?.creatorsResult?.ok !== undefined) {
@@ -241,12 +280,11 @@ export default function OceDashboard() {
     if (registerFetcher.data?.registerResult) {
       const res = registerFetcher.data.registerResult;
       if (res.ok !== false) {
-        setAssetsBanner({ tone: "success", message: `${res.succeeded || 0} asset(s) registered successfully${res.failed ? ` (${res.failed} failed)` : ""}!` });
+        setAssetsBanner({ tone: "success", message: `${res.succeeded || 0} video(s) registered successfully${res.failed ? ` (${res.failed} failed)` : ""}!` });
         setSelectedAssetIds([]);
-        // Refresh products
         const fd = new FormData();
-        fd.set("intent", "fetch-products");
-        productsFetcher.submit(fd, { method: "post" });
+        fd.set("intent", "fetch-videos");
+        videosFetcher.submit(fd, { method: "post" });
       } else {
         setAssetsBanner({ tone: "critical", message: res.error || "Registration failed" });
       }
@@ -256,12 +294,12 @@ export default function OceDashboard() {
   const handleLoadAssets = useCallback(() => {
     setAssetsBanner(null);
     const fd1 = new FormData();
-    fd1.set("intent", "fetch-products");
-    productsFetcher.submit(fd1, { method: "post" });
+    fd1.set("intent", "fetch-videos");
+    videosFetcher.submit(fd1, { method: "post" });
     const fd2 = new FormData();
     fd2.set("intent", "fetch-creators");
     creatorsFetcher.submit(fd2, { method: "post" });
-  }, [productsFetcher, creatorsFetcher]);
+  }, [videosFetcher, creatorsFetcher]);
 
   const handleToggleAssets = useCallback(() => {
     const willOpen = !assetsOpen;
@@ -278,22 +316,23 @@ export default function OceDashboard() {
   }, []);
 
   const handleSelectAll = useCallback((checked) => {
-    setSelectedAssetIds(checked ? products.map(p => p.numericId) : []);
-  }, [products]);
+    setSelectedAssetIds(checked ? videos.map(v => v.assetId) : []);
+  }, [videos]);
 
-  const handleRegisterAssets = useCallback((productList) => {
+  const handleRegisterAssets = useCallback((videoList) => {
     const creator = creators.find(c => (c.id || c.external_id || c.creator_id) === selectedCreator);
     const creatorId = selectedCreator || undefined;
     const creatorName = creator ? (creator.name || creator.display_name || creator.external_id || "") : undefined;
 
-    const assets = productList.map(p => ({
-      asset_id: p.assetId,
-      title: p.title,
-      skus: p.skus,
-      thumbnail_url: p.image || undefined,
+    const assets = videoList.map(v => ({
+      asset_id: v.assetId,
+      title: v.title || v.assetId,
+      skus: v.skus || [],
+      thumbnail_url: v.thumbnail || undefined,
+      source: v.source || undefined,
       creator_id: creatorId,
       creator_name: creatorName,
-      metadata: { shopify_product_id: p.numericId, shopify_handle: p.handle },
+      metadata: { platform: v.platform, discovered_by: v.discoveredBy },
     }));
 
     const fd = new FormData();
@@ -303,9 +342,9 @@ export default function OceDashboard() {
   }, [selectedCreator, creators, registerFetcher]);
 
   const handleBulkRegister = useCallback(() => {
-    const selected = products.filter(p => selectedAssetIds.includes(p.numericId));
+    const selected = videos.filter(v => selectedAssetIds.includes(v.assetId));
     if (selected.length) handleRegisterAssets(selected);
-  }, [products, selectedAssetIds, handleRegisterAssets]);
+  }, [videos, selectedAssetIds, handleRegisterAssets]);
 
   const creatorOptions = [
     { label: "-- Select a creator --", value: "" },
@@ -525,7 +564,7 @@ export default function OceDashboard() {
               <ChecklistItem
                 number={5}
                 title="Register Video Assets"
-                description="Use the Asset Registration section below to register products"
+                description="Use the Asset Registration section below to register discovered videos"
                 done={false}
               />
             </BlockStack>
@@ -720,7 +759,7 @@ export default function OceDashboard() {
               <BlockStack gap="100">
                 <Text variant="headingMd" as="h2">Asset Registration</Text>
                 <Text variant="bodySm" tone="subdued">
-                  Register your store products as OCE video assets and assign them to creators
+                  Register discovered videos as OCE assets and assign them to creators
                 </Text>
               </BlockStack>
               <Button onClick={handleToggleAssets} variant="plain">
@@ -739,7 +778,7 @@ export default function OceDashboard() {
                   <Box padding="400">
                     <InlineStack align="center" gap="200">
                       <Spinner size="small" />
-                      <Text variant="bodySm" tone="subdued">Loading products and creators...</Text>
+                      <Text variant="bodySm" tone="subdued">Loading videos and creators...</Text>
                     </InlineStack>
                   </Box>
                 )}
@@ -767,10 +806,10 @@ export default function OceDashboard() {
                       </Button>
                     </InlineStack>
 
-                    {products.length === 0 ? (
+                    {videos.length === 0 ? (
                       <Box padding="400">
                         <Text variant="bodySm" tone="subdued" alignment="center">
-                          No active products found in your store.
+                          No videos discovered. Ensure the OCE SDK is enabled and tracking video views on your storefront.
                         </Text>
                       </Box>
                     ) : (
@@ -779,38 +818,51 @@ export default function OceDashboard() {
                           <InlineStack gap="300" blockAlign="center">
                             <Checkbox
                               label="Select all"
-                              checked={selectedAssetIds.length === products.length && products.length > 0}
+                              checked={selectedAssetIds.length === videos.length && videos.length > 0}
                               onChange={handleSelectAll}
                             />
                             <Text variant="bodySm" tone="subdued">
-                              {products.length} product{products.length !== 1 ? "s" : ""} found
+                              {videos.length} video{videos.length !== 1 ? "s" : ""} found
                             </Text>
                           </InlineStack>
                         </Box>
-                        {products.map((product) => (
-                          <Box key={product.numericId} padding="300" borderBlockEndWidth="025" borderColor="border">
+                        {videos.map((video) => (
+                          <Box key={video.assetId} padding="300" borderBlockEndWidth="025" borderColor="border">
                             <InlineStack gap="400" blockAlign="center" wrap={false}>
                               <Checkbox
                                 label=""
                                 labelHidden
-                                checked={selectedAssetIds.includes(product.numericId)}
-                                onChange={(checked) => handleSelectAsset(product.numericId, checked)}
+                                checked={selectedAssetIds.includes(video.assetId)}
+                                onChange={(checked) => handleSelectAsset(video.assetId, checked)}
                               />
-                              <Thumbnail
-                                source={product.image || ""}
-                                alt={product.title}
-                                size="small"
-                              />
+                              {video.thumbnail ? (
+                                <Thumbnail source={video.thumbnail} alt={video.title || video.assetId} size="small" />
+                              ) : (
+                                <Box width="40px" minHeight="40px" background="bg-surface-secondary" borderRadius="200">
+                                  <div style={{ textAlign: "center", lineHeight: "40px" }}>
+                                    <Icon source={PlayIcon} tone="subdued" />
+                                  </div>
+                                </Box>
+                              )}
                               <Box minWidth="0" maxWidth="100%">
                                 <BlockStack gap="050">
                                   <Text variant="bodyMd" fontWeight="semibold" truncate>
-                                    {product.title}
+                                    {video.title || video.assetId}
                                   </Text>
-                                  <Text variant="bodySm" tone="subdued">{product.assetId}</Text>
-                                  {product.skus.length > 0 && (
+                                  <InlineStack gap="100" wrap>
+                                    <Badge tone="info">{video.platform || "Video"}</Badge>
+                                    {video.discoveredBy === "sdk" && <Badge>SDK tracked</Badge>}
+                                    {video.discoveredBy === "shopify" && <Badge>Shopify media</Badge>}
+                                    {video.exposureCount > 0 && (
+                                      <Text variant="bodySm" tone="subdued">
+                                        {video.exposureCount} exposure{video.exposureCount !== 1 ? "s" : ""}
+                                      </Text>
+                                    )}
+                                  </InlineStack>
+                                  {video.skus && video.skus.length > 0 && (
                                     <InlineStack gap="100" wrap>
-                                      {product.skus.map((sku) => (
-                                        <Badge key={sku} tone="info">{sku}</Badge>
+                                      {video.skus.map((sku) => (
+                                        <Badge key={sku} tone="attention">{sku}</Badge>
                                       ))}
                                     </InlineStack>
                                   )}
@@ -818,20 +870,20 @@ export default function OceDashboard() {
                               </Box>
                               <div style={{ marginLeft: "auto", flexShrink: 0 }}>
                                 <InlineStack gap="200" blockAlign="center">
-                                  {product.registered ? (
+                                  {video.registered ? (
                                     <Badge tone="success">
-                                      Registered{product.registeredCreatorName ? ` (${product.registeredCreatorName})` : ""}
+                                      Registered{video.registeredCreatorName ? ` (${video.registeredCreatorName})` : ""}
                                     </Badge>
                                   ) : (
                                     <Badge>Not registered</Badge>
                                   )}
                                   <Button
                                     size="slim"
-                                    variant={product.registered ? "secondary" : "primary"}
-                                    onClick={() => handleRegisterAssets([product])}
+                                    variant={video.registered ? "secondary" : "primary"}
+                                    onClick={() => handleRegisterAssets([video])}
                                     loading={registering}
                                   >
-                                    {product.registered ? "Update" : "Register"}
+                                    {video.registered ? "Update" : "Register"}
                                   </Button>
                                 </InlineStack>
                               </div>

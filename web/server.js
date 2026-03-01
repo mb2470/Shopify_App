@@ -25,6 +25,7 @@ import {
   getCreators,
   registerAssets,
   getRegisteredAssets,
+  getDiscoveredVideos,
 } from "./backend/routes/settings.js";
 
 const prisma = new PrismaClient();
@@ -460,108 +461,160 @@ app.get("/api/stats", authenticate, async (req, res) => {
   }
 });
 
-// ─── Products Route ──────────────────────────────────────────────
+// ─── Videos Route ────────────────────────────────────────────────
+// Discovers videos from two sources:
+//  1. OCE SDK tracked videos (via events.list management API)
+//  2. Shopify products with video media (VIDEO / EXTERNAL_VIDEO)
 
-app.get("/api/products", authenticate, async (req, res) => {
+function detectPlatform(assetId) {
+  if (!assetId) return "Video";
+  const id = assetId.toLowerCase();
+  if (id.startsWith("videowise")) return "Videowise";
+  if (id.startsWith("tolstoy")) return "Tolstoy";
+  if (id.startsWith("firework")) return "Firework";
+  if (id.includes("youtube") || id.includes("youtu.be")) return "YouTube";
+  if (id.includes("vimeo")) return "Vimeo";
+  if (id.startsWith("shopify-video")) return "Shopify";
+  if (id.startsWith("shopify-")) return "Shopify";
+  return "Video";
+}
+
+app.get("/api/videos", authenticate, async (req, res) => {
   try {
-    const graphqlUrl = `https://${req.shop}/admin/api/2024-10/graphql.json`;
-    const query = `{
-      products(first: 100, query: "status:active") {
-        edges {
-          node {
-            id
-            title
-            handle
-            featuredImage { url altText }
-            media(first: 10) {
-              edges {
-                node {
-                  mediaContentType
-                  ... on Video {
-                    id
-                    sources { url mimeType }
-                  }
-                  ... on ExternalVideo {
-                    id
-                    originUrl
-                    embeddedUrl
+    // Source 1: Videos discovered by OCE SDK (from exposure events)
+    let oceVideos = [];
+    try {
+      const discovered = await getDiscoveredVideos(req.shop);
+      if (discovered.ok) {
+        oceVideos = discovered.videos.map(v => ({
+          ...v,
+          platform: detectPlatform(v.assetId),
+          discoveredBy: "sdk",
+        }));
+      }
+    } catch (err) {
+      console.warn("[OCE] Failed to fetch OCE-discovered videos:", err.message);
+    }
+
+    // Source 2: Shopify products with video media
+    let shopifyVideos = [];
+    try {
+      const graphqlUrl = `https://${req.shop}/admin/api/2024-10/graphql.json`;
+      const query = `{
+        products(first: 100, query: "status:active") {
+          edges {
+            node {
+              id
+              title
+              handle
+              featuredImage { url }
+              media(first: 10) {
+                edges {
+                  node {
+                    mediaContentType
+                    ... on Video { id sources { url mimeType } }
+                    ... on ExternalVideo { id originUrl embeddedUrl }
                   }
                 }
               }
-            }
-            variants(first: 100) {
-              edges {
-                node {
-                  id
-                  sku
-                  title
-                }
+              variants(first: 100) {
+                edges { node { sku } }
               }
             }
           }
         }
+      }`;
+
+      const response = await fetch(graphqlUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Shopify-Access-Token": req.session.accessToken,
+        },
+        body: JSON.stringify({ query }),
+      });
+      const data = await response.json();
+
+      if (data.errors) {
+        console.warn("[OCE] Shopify GraphQL errors:", JSON.stringify(data.errors));
       }
-    }`;
 
-    const response = await fetch(graphqlUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": req.session.accessToken,
-      },
-      body: JSON.stringify({ query }),
-    });
-    const data = await response.json();
+      for (const edge of (data.data?.products?.edges || [])) {
+        const node = edge.node;
+        const videoMedia = (node.media?.edges || [])
+          .filter(m => m.node.mediaContentType === "VIDEO" || m.node.mediaContentType === "EXTERNAL_VIDEO");
 
-    if (data.errors) {
-      console.error("[OCE] GraphQL errors:", JSON.stringify(data.errors));
-      return res.status(500).json({ ok: false, error: data.errors[0]?.message });
+        if (videoMedia.length === 0) continue; // Skip products without videos
+
+        const skus = (node.variants?.edges || []).map(v => v.node.sku).filter(Boolean);
+
+        for (const vm of videoMedia) {
+          const mn = vm.node;
+          const videoUrl = mn.sources?.[0]?.url || mn.originUrl || mn.embeddedUrl;
+          const mediaId = mn.id.replace(/gid:\/\/shopify\/(Video|ExternalVideo)\//, "");
+          const assetId = `shopify-video-${mediaId}`;
+          const isExternal = mn.mediaContentType === "EXTERNAL_VIDEO";
+
+          shopifyVideos.push({
+            assetId,
+            title: node.title + (videoMedia.length > 1 ? ` (${isExternal ? "External" : "Hosted"})` : ""),
+            source: videoUrl,
+            thumbnail: node.featuredImage?.url || null,
+            platform: isExternal ? detectPlatform(videoUrl) : "Shopify",
+            skus,
+            exposureCount: 0,
+            lastSeen: null,
+            discoveredBy: "shopify",
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[OCE] Failed to fetch Shopify video media:", err.message);
     }
 
-    // Get registered assets to mark which products are already registered
+    // Get registered assets to mark status
     const registered = await getRegisteredAssets(req.shop);
     const registeredMap = {};
+    for (const ra of registered) registeredMap[ra.assetId] = ra;
+
+    // Merge: OCE SDK videos first, then Shopify video media not already seen
+    const seenIds = new Set(oceVideos.map(v => v.assetId));
+    const allVideos = [
+      ...oceVideos,
+      ...shopifyVideos.filter(v => !seenIds.has(v.assetId)),
+    ];
+
+    // Also include previously registered assets not found in either source
     for (const ra of registered) {
-      registeredMap[ra.assetId] = ra;
+      if (!seenIds.has(ra.assetId) && !shopifyVideos.find(v => v.assetId === ra.assetId)) {
+        allVideos.push({
+          assetId: ra.assetId,
+          title: ra.title || ra.assetId,
+          source: ra.videoUrl,
+          thumbnail: null,
+          platform: detectPlatform(ra.assetId),
+          skus: JSON.parse(ra.skus || "[]"),
+          exposureCount: 0,
+          lastSeen: null,
+          discoveredBy: "registered",
+        });
+      }
     }
 
-    const products = (data.data?.products?.edges || []).map(e => {
-      const node = e.node;
-      const numericId = node.id.replace("gid://shopify/Product/", "");
-      const assetId = `shopify-${numericId}`;
-      const videos = (node.media?.edges || [])
-        .filter(m => m.node.mediaContentType === "VIDEO" || m.node.mediaContentType === "EXTERNAL_VIDEO")
-        .map(m => ({
-          id: m.node.id,
-          type: m.node.mediaContentType,
-          url: m.node.sources?.[0]?.url || m.node.originUrl || m.node.embeddedUrl,
-        }));
-      const variants = (node.variants?.edges || []).map(v => ({
-        id: v.node.id,
-        sku: v.node.sku,
-        title: v.node.title,
-      }));
-      const reg = registeredMap[assetId];
-      return {
-        id: node.id,
-        numericId,
-        assetId,
-        title: node.title,
-        handle: node.handle,
-        image: node.featuredImage?.url,
-        videos,
-        variants,
-        skus: variants.map(v => v.sku).filter(Boolean),
-        registered: !!reg,
-        registeredCreatorId: reg?.creatorId || null,
-        registeredCreatorName: reg?.creatorName || null,
-      };
-    });
+    // Attach registration status
+    for (const v of allVideos) {
+      const reg = registeredMap[v.assetId];
+      v.registered = !!reg;
+      v.registeredCreatorId = reg?.creatorId || null;
+      v.registeredCreatorName = reg?.creatorName || null;
+    }
 
-    console.log("[OCE] GET /api/products:", products.length, "products,", registered.length, "registered");
-    res.json({ ok: true, products });
+    console.log("[OCE] GET /api/videos:", allVideos.length, "videos (" +
+      oceVideos.length + " SDK, " + shopifyVideos.length + " Shopify media, " +
+      registered.length + " registered)");
+    res.json({ ok: true, videos: allVideos });
   } catch (err) {
-    console.error("[OCE] GET /api/products error:", err);
+    console.error("[OCE] GET /api/videos error:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -745,12 +798,12 @@ function getAdminHTML(shop, host) {
   </div>
 
   <div class="card">
-    <div class="card-row"><h2>Asset Registration</h2>
+    <div class="card-row"><h2>Video Asset Registration</h2>
       <button class="btn btn-link" id="assets-toggle" onclick="toggleAssets()">Expand &#9662;</button>
     </div>
-    <p style="font-size:13px;color:#6d7175;margin-top:4px">Register your store products as OCE video assets and assign them to creators</p>
+    <p style="font-size:13px;color:#6d7175;margin-top:4px">Videos discovered by the OCE SDK and Shopify product media. Register them to enable attribution tracking.</p>
     <div id="assets-panel" style="display:none"><hr>
-      <div id="assets-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Loading products and creators...</div>
+      <div id="assets-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Discovering videos and loading creators...</div>
       <div id="assets-error" style="display:none;color:#6e1717;padding:12px;background:#fff4f4;border-radius:8px;margin-bottom:12px"></div>
       <div id="assets-success" style="display:none;color:#0b5e3b;padding:12px;background:#f1f8f5;border:1px solid #aee9d1;border-radius:8px;margin-bottom:12px"></div>
       <div id="assets-content" style="display:none">
@@ -764,16 +817,20 @@ function getAdminHTML(shop, host) {
           <thead>
             <tr>
               <th style="width:36px"><input type="checkbox" id="select-all" onclick="toggleSelectAll()" /></th>
-              <th style="width:50px"></th>
-              <th>Product</th>
+              <th>Video</th>
+              <th>Platform</th>
               <th>SKUs</th>
+              <th>Exposures</th>
               <th>Status</th>
               <th style="width:100px">Action</th>
             </tr>
           </thead>
           <tbody id="assets-tbody"></tbody>
         </table>
-        <div id="assets-empty" style="display:none;text-align:center;padding:24px;color:#6d7175">No active products found in your store.</div>
+        <div id="assets-empty" style="display:none;text-align:center;padding:24px;color:#6d7175">
+          <p style="font-size:14px;font-weight:500;margin-bottom:8px">No videos discovered yet</p>
+          <p>Make sure the OCE SDK is enabled and your storefront has video content.<br>The SDK auto-detects Videowise, Tolstoy, Firework, YouTube, Vimeo, and HTML5 video players.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -944,9 +1001,9 @@ function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on"
 function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none"}
 function tWh(){st.wh=!st.wh;tog("wt",st.wh)}
 
-// ── Asset Registration ──
+// ── Video Asset Registration ──
 let assetsOpen=false;
-let assetProducts=[];
+let assetVideos=[];
 let assetCreators=[];
 let selectedAssets=new Set();
 
@@ -964,14 +1021,14 @@ async function loadAssetData(){
   document.getElementById("assets-success").style.display="none";
   selectedAssets.clear();
   try{
-    var pr=api("GET","/api/products");
+    var vr=api("GET","/api/videos");
     var cr=api("GET","/api/creators");
-    var products=await pr;
+    var videosResp=await vr;
     var creators=await cr;
-    console.log("[assets] products:",JSON.stringify(products).substring(0,200));
+    console.log("[assets] videos:",JSON.stringify(videosResp).substring(0,300));
     console.log("[assets] creators:",JSON.stringify(creators).substring(0,200));
-    if(products.ok===false)throw new Error(products.error||"Failed to load products");
-    assetProducts=products.products||[];
+    if(videosResp.ok===false)throw new Error(videosResp.error||"Failed to discover videos");
+    assetVideos=videosResp.videos||[];
     assetCreators=(creators.ok!==false&&creators.creators)?creators.creators:[];
     renderCreatorDropdown();
     renderAssetTable();
@@ -994,21 +1051,30 @@ function renderCreatorDropdown(){
   });
 }
 
+function srcBadge(src){
+  var map={sdk:["b-ok","SDK Tracked"],shopify:["b-info","Shopify Media"],registered:["b-warn","Previously Registered"]};
+  var m=map[src]||["b-info",src];
+  return '<span class="badge '+m[0]+'">'+m[1]+'</span>';
+}
+
 function renderAssetTable(){
   var tbody=document.getElementById("assets-tbody");
-  if(!assetProducts.length){
+  if(!assetVideos.length){
     tbody.innerHTML="";
     document.getElementById("assets-empty").style.display="block";
     return;
   }
   document.getElementById("assets-empty").style.display="none";
-  tbody.innerHTML=assetProducts.map(function(p){
-    var img=p.image?'<img class="asset-img" src="'+p.image+'" alt="" />':'<div class="asset-img" style="display:flex;align-items:center;justify-content:center;font-size:18px;color:#6d7175">&#128247;</div>';
-    var skus=p.skus.length?p.skus.map(function(s){return '<span class="sku-tag">'+s+'</span>'}).join(""):'<span style="color:#6d7175;font-size:12px">No SKUs</span>';
-    var status=p.registered?'<span class="badge b-ok">Registered</span>'+(p.registeredCreatorName?' <span style="font-size:11px;color:#6d7175">'+p.registeredCreatorName+'</span>':""):'<span class="badge b-info">Not registered</span>';
-    var action=p.registered?'<button class="btn btn-s btn-sm" onclick="registerSingle(\\''+p.numericId+'\\')">Update</button>':'<button class="btn btn-p btn-sm" onclick="registerSingle(\\''+p.numericId+'\\')">Register</button>';
-    var checked=selectedAssets.has(p.numericId)?"checked":"";
-    return '<tr data-id="'+p.numericId+'"><td><input type="checkbox" '+checked+' onchange="toggleAssetSelect(\\''+p.numericId+'\\',this.checked)" /></td><td>'+img+'</td><td><strong>'+p.title+'</strong><br><span style="font-size:11px;color:#6d7175">'+p.assetId+'</span></td><td><div class="sku-tags">'+skus+'</div></td><td>'+status+'</td><td>'+action+'</td></tr>';
+  tbody.innerHTML=assetVideos.map(function(v){
+    var title=v.title||v.assetId;
+    var sourceUrl=v.source?'<a href="'+v.source+'" target="_blank" style="font-size:11px;word-break:break-all">'+v.source.substring(0,60)+(v.source.length>60?"...":"")+'</a>':"";
+    var skus=v.skus&&v.skus.length?v.skus.map(function(s){return '<span class="sku-tag">'+s+'</span>'}).join(""):'<span style="color:#6d7175;font-size:12px">&mdash;</span>';
+    var expCount=v.exposureCount?'<strong>'+v.exposureCount.toLocaleString()+'</strong>':'<span style="color:#6d7175">0</span>';
+    var status=v.registered?'<span class="badge b-ok">Registered</span>'+(v.registeredCreatorName?' <span style="font-size:11px;color:#6d7175">'+v.registeredCreatorName+'</span>':""):'<span class="badge b-info">Not registered</span>';
+    var aid=v.assetId.replace(/'/g,"\\\\'");
+    var action=v.registered?'<button class="btn btn-s btn-sm" onclick="registerSingle(\\''+aid+'\\')">Update</button>':'<button class="btn btn-p btn-sm" onclick="registerSingle(\\''+aid+'\\')">Register</button>';
+    var checked=selectedAssets.has(v.assetId)?"checked":"";
+    return '<tr data-id="'+v.assetId+'"><td><input type="checkbox" '+checked+' onchange="toggleAssetSelect(\\''+aid+'\\',this.checked)" /></td><td><strong>'+title+'</strong><br><span style="font-size:11px;color:#6d7175">'+v.assetId+'</span><br>'+sourceUrl+'</td><td>'+v.platform+' '+srcBadge(v.discoveredBy)+'</td><td><div class="sku-tags">'+skus+'</div></td><td>'+expCount+'</td><td>'+status+'</td><td>'+action+'</td></tr>';
   }).join("");
   updateBulkBtn();
 }
@@ -1020,8 +1086,8 @@ function toggleAssetSelect(id,checked){
 
 function toggleSelectAll(){
   var all=document.getElementById("select-all").checked;
-  assetProducts.forEach(function(p){
-    if(all)selectedAssets.add(p.numericId);else selectedAssets.delete(p.numericId);
+  assetVideos.forEach(function(v){
+    if(all)selectedAssets.add(v.assetId);else selectedAssets.delete(v.assetId);
   });
   renderAssetTable();
   document.getElementById("select-all").checked=all;
@@ -1040,30 +1106,31 @@ function getSelectedCreator(){
   return {id:sel.value,name:opt?opt.getAttribute("data-name"):""};
 }
 
-async function registerSingle(numericId){
-  var p=assetProducts.find(function(x){return x.numericId===numericId});
-  if(!p)return;
+async function registerSingle(assetId){
+  var v=assetVideos.find(function(x){return x.assetId===assetId});
+  if(!v)return;
   var creator=getSelectedCreator();
-  await doRegister([p],creator);
+  await doRegister([v],creator);
 }
 
 async function bulkRegister(){
   var creator=getSelectedCreator();
-  var selected=assetProducts.filter(function(p){return selectedAssets.has(p.numericId)});
+  var selected=assetVideos.filter(function(v){return selectedAssets.has(v.assetId)});
   if(!selected.length)return;
   await doRegister(selected,creator);
 }
 
-async function doRegister(products,creator){
+async function doRegister(videos,creator){
   document.getElementById("assets-error").style.display="none";
   document.getElementById("assets-success").style.display="none";
-  var assets=products.map(function(p){
+  var assets=videos.map(function(v){
     var asset={
-      asset_id:p.assetId,
-      title:p.title,
-      skus:p.skus,
-      thumbnail_url:p.image||undefined,
-      metadata:{shopify_product_id:p.numericId,shopify_handle:p.handle}
+      asset_id:v.assetId,
+      title:v.title||v.assetId,
+      skus:v.skus||[],
+      thumbnail_url:v.thumbnail||undefined,
+      source:v.source||undefined,
+      metadata:{platform:v.platform,discovered_by:v.discoveredBy}
     };
     if(creator.id){asset.creator_id=creator.id;asset.creator_name=creator.name}
     return asset;
@@ -1074,7 +1141,7 @@ async function doRegister(products,creator){
     if(r.ok!==false){
       var s=r.succeeded||assets.length;
       var f=r.failed||0;
-      document.getElementById("assets-success").textContent=s+" asset(s) registered successfully"+(f?" ("+f+" failed)":"")+"!";
+      document.getElementById("assets-success").textContent=s+" video(s) registered successfully"+(f?" ("+f+" failed)":"")+"!";
       document.getElementById("assets-success").style.display="block";
       selectedAssets.clear();
       document.getElementById("assets-content").dataset.loaded="";
