@@ -22,6 +22,9 @@ import {
   syncAppMetafields,
   getAppMetafields,
   getStatsOverview,
+  getCreators,
+  registerAssets,
+  getRegisteredAssets,
 } from "./backend/routes/settings.js";
 
 const prisma = new PrismaClient();
@@ -457,6 +460,142 @@ app.get("/api/stats", authenticate, async (req, res) => {
   }
 });
 
+// ─── Products Route ──────────────────────────────────────────────
+
+app.get("/api/products", authenticate, async (req, res) => {
+  try {
+    const graphqlUrl = `https://${req.shop}/admin/api/2024-10/graphql.json`;
+    const query = `{
+      products(first: 100, query: "status:active") {
+        edges {
+          node {
+            id
+            title
+            handle
+            featuredImage { url altText }
+            media(first: 10) {
+              edges {
+                node {
+                  mediaContentType
+                  ... on Video {
+                    id
+                    sources { url mimeType }
+                  }
+                  ... on ExternalVideo {
+                    id
+                    originUrl
+                    embeddedUrl
+                  }
+                }
+              }
+            }
+            variants(first: 100) {
+              edges {
+                node {
+                  id
+                  sku
+                  title
+                }
+              }
+            }
+          }
+        }
+      }
+    }`;
+
+    const response = await fetch(graphqlUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Shopify-Access-Token": req.session.accessToken,
+      },
+      body: JSON.stringify({ query }),
+    });
+    const data = await response.json();
+
+    if (data.errors) {
+      console.error("[OCE] GraphQL errors:", JSON.stringify(data.errors));
+      return res.status(500).json({ ok: false, error: data.errors[0]?.message });
+    }
+
+    // Get registered assets to mark which products are already registered
+    const registered = await getRegisteredAssets(req.shop);
+    const registeredMap = {};
+    for (const ra of registered) {
+      registeredMap[ra.assetId] = ra;
+    }
+
+    const products = (data.data?.products?.edges || []).map(e => {
+      const node = e.node;
+      const numericId = node.id.replace("gid://shopify/Product/", "");
+      const assetId = `shopify-${numericId}`;
+      const videos = (node.media?.edges || [])
+        .filter(m => m.node.mediaContentType === "VIDEO" || m.node.mediaContentType === "EXTERNAL_VIDEO")
+        .map(m => ({
+          id: m.node.id,
+          type: m.node.mediaContentType,
+          url: m.node.sources?.[0]?.url || m.node.originUrl || m.node.embeddedUrl,
+        }));
+      const variants = (node.variants?.edges || []).map(v => ({
+        id: v.node.id,
+        sku: v.node.sku,
+        title: v.node.title,
+      }));
+      const reg = registeredMap[assetId];
+      return {
+        id: node.id,
+        numericId,
+        assetId,
+        title: node.title,
+        handle: node.handle,
+        image: node.featuredImage?.url,
+        videos,
+        variants,
+        skus: variants.map(v => v.sku).filter(Boolean),
+        registered: !!reg,
+        registeredCreatorId: reg?.creatorId || null,
+        registeredCreatorName: reg?.creatorName || null,
+      };
+    });
+
+    console.log("[OCE] GET /api/products:", products.length, "products,", registered.length, "registered");
+    res.json({ ok: true, products });
+  } catch (err) {
+    console.error("[OCE] GET /api/products error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Creators Route ─────────────────────────────────────────────
+
+app.get("/api/creators", authenticate, async (req, res) => {
+  try {
+    const result = await getCreators(req.shop);
+    console.log("[OCE] GET /api/creators:", JSON.stringify(result));
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] GET /api/creators error:", err);
+    res.status(500).json({ ok: false, error: err.message, creators: [] });
+  }
+});
+
+// ─── Asset Registration Route ───────────────────────────────────
+
+app.post("/api/assets/register", authenticate, async (req, res) => {
+  try {
+    const { assets } = req.body;
+    if (!assets || !Array.isArray(assets) || assets.length === 0) {
+      return res.status(400).json({ ok: false, error: "No assets provided" });
+    }
+    console.log("[OCE] POST /api/assets/register:", assets.length, "assets");
+    const result = await registerAssets(req.shop, assets);
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] POST /api/assets/register error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Admin UI ─────────────────────────────────────────────────────
 
 app.get("/", (req, res) => {
@@ -523,6 +662,18 @@ function getAdminHTML(shop, host) {
     .o-row{display:flex;justify-content:space-between;padding:6px 0;font-size:13px;border-bottom:1px solid #f1f1f1}
     @media(max-width:768px){.grid-3,.grid-4,.grid-2{grid-template-columns:1fr}}
     a{color:#005bd3}
+    .asset-table{width:100%;border-collapse:collapse;margin-top:12px}
+    .asset-table th{text-align:left;padding:8px 12px;font-size:13px;font-weight:600;color:#6d7175;border-bottom:2px solid #e1e3e5;background:#f6f6f7}
+    .asset-table td{padding:10px 12px;font-size:13px;border-bottom:1px solid #f1f1f1;vertical-align:middle}
+    .asset-table tr:hover{background:#f9fafb}
+    .asset-table input[type=checkbox]{width:16px;height:16px;cursor:pointer}
+    .asset-img{width:40px;height:40px;border-radius:6px;object-fit:cover;background:#f6f6f7}
+    .sku-tags{display:flex;flex-wrap:wrap;gap:4px}
+    .sku-tag{background:#e4e5e7;color:#44474a;padding:1px 6px;border-radius:4px;font-size:11px}
+    .asset-toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+    .asset-toolbar select{width:auto;min-width:200px}
+    .btn-sm{padding:4px 12px;font-size:13px;border-radius:6px}
+    .btn-danger{background:#fff4f4;color:#6e1717;border:1px solid #fed3d1}
   </style>
 </head>
 <body>
@@ -593,12 +744,46 @@ function getAdminHTML(shop, host) {
     </div>
   </div>
 
+  <div class="card">
+    <div class="card-row"><h2>Asset Registration</h2>
+      <button class="btn btn-link" id="assets-toggle" onclick="toggleAssets()">Expand &#9662;</button>
+    </div>
+    <p style="font-size:13px;color:#6d7175;margin-top:4px">Register your store products as OCE video assets and assign them to creators</p>
+    <div id="assets-panel" style="display:none"><hr>
+      <div id="assets-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Loading products and creators...</div>
+      <div id="assets-error" style="display:none;color:#6e1717;padding:12px;background:#fff4f4;border-radius:8px;margin-bottom:12px"></div>
+      <div id="assets-success" style="display:none;color:#0b5e3b;padding:12px;background:#f1f8f5;border:1px solid #aee9d1;border-radius:8px;margin-bottom:12px"></div>
+      <div id="assets-content" style="display:none">
+        <div class="asset-toolbar">
+          <label style="font-size:13px;font-weight:500">Creator:</label>
+          <select id="creator-select"><option value="">-- Select a creator --</option></select>
+          <button class="btn btn-p btn-sm" id="bulk-register-btn" onclick="bulkRegister()" disabled>Register Selected (0)</button>
+          <button class="btn btn-s btn-sm" onclick="loadAssetData()">Refresh</button>
+        </div>
+        <table class="asset-table">
+          <thead>
+            <tr>
+              <th style="width:36px"><input type="checkbox" id="select-all" onclick="toggleSelectAll()" /></th>
+              <th style="width:50px"></th>
+              <th>Product</th>
+              <th>SKUs</th>
+              <th>Status</th>
+              <th style="width:100px">Action</th>
+            </tr>
+          </thead>
+          <tbody id="assets-tbody"></tbody>
+        </table>
+        <div id="assets-empty" style="display:none;text-align:center;padding:24px;color:#6d7175">No active products found in your store.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="card"><h2>How It Works</h2>
     <div class="grid-4">
-      <div class="fs"><div class="ic">▶️</div><h4>Video Plays</h4><p>User watches creator content</p></div>
-      <div class="fs"><div class="ic">📊</div><h4>Events Tracked</h4><p>Impressions, clicks, watch</p></div>
-      <div class="fs"><div class="ic">🛒</div><h4>Order Received</h4><p>Conversion via webhook</p></div>
-      <div class="fs"><div class="ic">💰</div><h4>Attribution</h4><p>Commission calculated</p></div>
+      <div class="fs"><div class="ic">&#9654;&#65039;</div><h4>Video Plays</h4><p>User watches creator content</p></div>
+      <div class="fs"><div class="ic">&#128202;</div><h4>Events Tracked</h4><p>Impressions, clicks, watch</p></div>
+      <div class="fs"><div class="ic">&#128722;</div><h4>Order Received</h4><p>Conversion via webhook</p></div>
+      <div class="fs"><div class="ic">&#128176;</div><h4>Attribution</h4><p>Commission calculated</p></div>
     </div>
   </div>
 </div>
@@ -758,6 +943,151 @@ async function loadStats(days){
 function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on");else e.classList.remove("on")}
 function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none"}
 function tWh(){st.wh=!st.wh;tog("wt",st.wh)}
+
+// ── Asset Registration ──
+let assetsOpen=false;
+let assetProducts=[];
+let assetCreators=[];
+let selectedAssets=new Set();
+
+function toggleAssets(){
+  assetsOpen=!assetsOpen;
+  document.getElementById("assets-panel").style.display=assetsOpen?"block":"none";
+  document.getElementById("assets-toggle").textContent=assetsOpen?"Collapse \\u25B4":"Expand \\u25BE";
+  if(assetsOpen&&!document.getElementById("assets-content").dataset.loaded){loadAssetData()}
+}
+
+async function loadAssetData(){
+  document.getElementById("assets-loading").style.display="block";
+  document.getElementById("assets-content").style.display="none";
+  document.getElementById("assets-error").style.display="none";
+  document.getElementById("assets-success").style.display="none";
+  selectedAssets.clear();
+  try{
+    var pr=api("GET","/api/products");
+    var cr=api("GET","/api/creators");
+    var products=await pr;
+    var creators=await cr;
+    console.log("[assets] products:",JSON.stringify(products).substring(0,200));
+    console.log("[assets] creators:",JSON.stringify(creators).substring(0,200));
+    if(products.ok===false)throw new Error(products.error||"Failed to load products");
+    assetProducts=products.products||[];
+    assetCreators=(creators.ok!==false&&creators.creators)?creators.creators:[];
+    renderCreatorDropdown();
+    renderAssetTable();
+    document.getElementById("assets-content").style.display="block";
+    document.getElementById("assets-content").dataset.loaded="1";
+  }catch(e){
+    document.getElementById("assets-error").textContent="Error: "+e.message;
+    document.getElementById("assets-error").style.display="block";
+  }
+  document.getElementById("assets-loading").style.display="none";
+}
+
+function renderCreatorDropdown(){
+  var sel=document.getElementById("creator-select");
+  sel.innerHTML='<option value="">-- Select a creator --</option>';
+  assetCreators.forEach(function(c){
+    var id=c.id||c.external_id||c.creator_id||"";
+    var name=c.name||c.display_name||c.external_id||id;
+    sel.innerHTML+='<option value="'+id+'" data-name="'+name.replace(/"/g,"&quot;")+'">'+name+'</option>';
+  });
+}
+
+function renderAssetTable(){
+  var tbody=document.getElementById("assets-tbody");
+  if(!assetProducts.length){
+    tbody.innerHTML="";
+    document.getElementById("assets-empty").style.display="block";
+    return;
+  }
+  document.getElementById("assets-empty").style.display="none";
+  tbody.innerHTML=assetProducts.map(function(p){
+    var img=p.image?'<img class="asset-img" src="'+p.image+'" alt="" />':'<div class="asset-img" style="display:flex;align-items:center;justify-content:center;font-size:18px;color:#6d7175">&#128247;</div>';
+    var skus=p.skus.length?p.skus.map(function(s){return '<span class="sku-tag">'+s+'</span>'}).join(""):'<span style="color:#6d7175;font-size:12px">No SKUs</span>';
+    var status=p.registered?'<span class="badge b-ok">Registered</span>'+(p.registeredCreatorName?' <span style="font-size:11px;color:#6d7175">'+p.registeredCreatorName+'</span>':""):'<span class="badge b-info">Not registered</span>';
+    var action=p.registered?'<button class="btn btn-s btn-sm" onclick="registerSingle(\''+p.numericId+'\')">Update</button>':'<button class="btn btn-p btn-sm" onclick="registerSingle(\''+p.numericId+'\')">Register</button>';
+    var checked=selectedAssets.has(p.numericId)?"checked":"";
+    return '<tr data-id="'+p.numericId+'"><td><input type="checkbox" '+checked+' onchange="toggleAssetSelect(\''+p.numericId+'\',this.checked)" /></td><td>'+img+'</td><td><strong>'+p.title+'</strong><br><span style="font-size:11px;color:#6d7175">'+p.assetId+'</span></td><td><div class="sku-tags">'+skus+'</div></td><td>'+status+'</td><td>'+action+'</td></tr>';
+  }).join("");
+  updateBulkBtn();
+}
+
+function toggleAssetSelect(id,checked){
+  if(checked)selectedAssets.add(id);else selectedAssets.delete(id);
+  updateBulkBtn();
+}
+
+function toggleSelectAll(){
+  var all=document.getElementById("select-all").checked;
+  assetProducts.forEach(function(p){
+    if(all)selectedAssets.add(p.numericId);else selectedAssets.delete(p.numericId);
+  });
+  renderAssetTable();
+  document.getElementById("select-all").checked=all;
+}
+
+function updateBulkBtn(){
+  var btn=document.getElementById("bulk-register-btn");
+  var n=selectedAssets.size;
+  btn.textContent="Register Selected ("+n+")";
+  btn.disabled=n===0;
+}
+
+function getSelectedCreator(){
+  var sel=document.getElementById("creator-select");
+  var opt=sel.options[sel.selectedIndex];
+  return {id:sel.value,name:opt?opt.getAttribute("data-name"):""};
+}
+
+async function registerSingle(numericId){
+  var p=assetProducts.find(function(x){return x.numericId===numericId});
+  if(!p)return;
+  var creator=getSelectedCreator();
+  await doRegister([p],creator);
+}
+
+async function bulkRegister(){
+  var creator=getSelectedCreator();
+  var selected=assetProducts.filter(function(p){return selectedAssets.has(p.numericId)});
+  if(!selected.length)return;
+  await doRegister(selected,creator);
+}
+
+async function doRegister(products,creator){
+  document.getElementById("assets-error").style.display="none";
+  document.getElementById("assets-success").style.display="none";
+  var assets=products.map(function(p){
+    var asset={
+      asset_id:p.assetId,
+      title:p.title,
+      skus:p.skus,
+      thumbnail_url:p.image||undefined,
+      metadata:{shopify_product_id:p.numericId,shopify_handle:p.handle}
+    };
+    if(creator.id){asset.creator_id=creator.id;asset.creator_name=creator.name}
+    return asset;
+  });
+  try{
+    var r=await api("POST","/api/assets/register",{assets:assets});
+    console.log("[assets] register response:",JSON.stringify(r));
+    if(r.ok!==false){
+      var s=r.succeeded||assets.length;
+      var f=r.failed||0;
+      document.getElementById("assets-success").textContent=s+" asset(s) registered successfully"+(f?" ("+f+" failed)":"")+"!";
+      document.getElementById("assets-success").style.display="block";
+      selectedAssets.clear();
+      document.getElementById("assets-content").dataset.loaded="";
+      loadAssetData();
+    }else{
+      document.getElementById("assets-error").textContent=r.error||"Registration failed";
+      document.getElementById("assets-error").style.display="block";
+    }
+  }catch(e){
+    document.getElementById("assets-error").textContent="Error: "+e.message;
+    document.getElementById("assets-error").style.display="block";
+  }
+}
 
 // Wait for App Bridge iframe handshake before first API call
 if(window.shopify&&window.shopify.idToken){

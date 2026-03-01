@@ -24,6 +24,9 @@ import {
   SkeletonBodyText,
   Collapsible,
   ButtonGroup,
+  Checkbox,
+  Select,
+  Thumbnail,
 } from "@shopify/polaris";
 import {
   CheckCircleIcon,
@@ -37,7 +40,7 @@ import {
 } from "@shopify/polaris-icons";
 import { useLoaderData, useSubmit, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import { json } from "@remix-run/node";
-import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview } from "../backend/routes/settings.js";
+import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets } from "../backend/routes/settings.js";
 import shopify from "../server.js";
 
 // ─── Remix Loader / Action ────────────────────────────────────────
@@ -95,6 +98,84 @@ export async function action({ request }) {
           },
         });
       }
+      case "fetch-products": {
+        // Fetch products from Shopify + registered assets from DB
+        const graphqlUrl = `https://${shop}/admin/api/2024-10/graphql.json`;
+        const graphqlRes = await fetch(graphqlUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": session.accessToken,
+          },
+          body: JSON.stringify({
+            query: `{
+              products(first: 100, query: "status:active") {
+                edges {
+                  node {
+                    id
+                    title
+                    handle
+                    featuredImage { url altText }
+                    media(first: 10) {
+                      edges {
+                        node {
+                          mediaContentType
+                          ... on Video { id sources { url mimeType } }
+                          ... on ExternalVideo { id originUrl embeddedUrl }
+                        }
+                      }
+                    }
+                    variants(first: 100) {
+                      edges { node { id sku title } }
+                    }
+                  }
+                }
+              }
+            }`,
+          }),
+        });
+        const graphqlData = await graphqlRes.json();
+        const registered = await getRegisteredAssets(shop);
+        const registeredMap = {};
+        for (const ra of registered) registeredMap[ra.assetId] = ra;
+
+        const products = (graphqlData.data?.products?.edges || []).map(e => {
+          const node = e.node;
+          const numericId = node.id.replace("gid://shopify/Product/", "");
+          const assetId = `shopify-${numericId}`;
+          const variants = (node.variants?.edges || []).map(v => ({
+            id: v.node.id, sku: v.node.sku, title: v.node.title,
+          }));
+          const videos = (node.media?.edges || [])
+            .filter(m => m.node.mediaContentType === "VIDEO" || m.node.mediaContentType === "EXTERNAL_VIDEO")
+            .map(m => ({
+              id: m.node.id,
+              type: m.node.mediaContentType,
+              url: m.node.sources?.[0]?.url || m.node.originUrl || m.node.embeddedUrl,
+            }));
+          const reg = registeredMap[assetId];
+          return {
+            id: node.id, numericId, assetId, title: node.title, handle: node.handle,
+            image: node.featuredImage?.url, videos, variants,
+            skus: variants.map(v => v.sku).filter(Boolean),
+            registered: !!reg,
+            registeredCreatorId: reg?.creatorId || null,
+            registeredCreatorName: reg?.creatorName || null,
+          };
+        });
+        return json({ productsResult: { ok: true, products } });
+      }
+      case "fetch-creators": {
+        const creatorsResult = await getCreators(shop);
+        console.log("[OCE] Remix creators response:", JSON.stringify(creatorsResult).substring(0, 200));
+        return json({ creatorsResult });
+      }
+      case "register-assets": {
+        const assets = JSON.parse(formData.get("assets"));
+        console.log("[OCE] Remix register-assets:", assets.length, "assets");
+        const regResult = await registerAssets(shop, assets);
+        return json({ registerResult: regResult });
+      }
       default:
         return json({ error: "Unknown action" }, { status: 400 });
     }
@@ -127,6 +208,112 @@ export default function OceDashboard() {
   const statsFetcher = useFetcher();
   const statsData = statsFetcher.data?.statsResult;
   const statsLoading = statsFetcher.state === "submitting";
+
+  // ─── Assets State ──────────────────────────────────────────
+  const [assetsOpen, setAssetsOpen] = useState(false);
+  const [products, setProducts] = useState([]);
+  const [creators, setCreators] = useState([]);
+  const [selectedCreator, setSelectedCreator] = useState("");
+  const [selectedAssetIds, setSelectedAssetIds] = useState([]);
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
+  const [assetsBanner, setAssetsBanner] = useState(null);
+  const productsFetcher = useFetcher();
+  const creatorsFetcher = useFetcher();
+  const registerFetcher = useFetcher();
+  const assetsLoading = productsFetcher.state === "submitting" || creatorsFetcher.state === "submitting";
+  const registering = registerFetcher.state === "submitting";
+
+  // Process fetcher responses
+  useEffect(() => {
+    if (productsFetcher.data?.productsResult?.ok) {
+      setProducts(productsFetcher.data.productsResult.products);
+      setAssetsLoaded(true);
+    }
+  }, [productsFetcher.data]);
+
+  useEffect(() => {
+    if (creatorsFetcher.data?.creatorsResult?.ok !== undefined) {
+      setCreators(creatorsFetcher.data.creatorsResult.creators || []);
+    }
+  }, [creatorsFetcher.data]);
+
+  useEffect(() => {
+    if (registerFetcher.data?.registerResult) {
+      const res = registerFetcher.data.registerResult;
+      if (res.ok !== false) {
+        setAssetsBanner({ tone: "success", message: `${res.succeeded || 0} asset(s) registered successfully${res.failed ? ` (${res.failed} failed)` : ""}!` });
+        setSelectedAssetIds([]);
+        // Refresh products
+        const fd = new FormData();
+        fd.set("intent", "fetch-products");
+        productsFetcher.submit(fd, { method: "post" });
+      } else {
+        setAssetsBanner({ tone: "critical", message: res.error || "Registration failed" });
+      }
+    }
+  }, [registerFetcher.data]);
+
+  const handleLoadAssets = useCallback(() => {
+    setAssetsBanner(null);
+    const fd1 = new FormData();
+    fd1.set("intent", "fetch-products");
+    productsFetcher.submit(fd1, { method: "post" });
+    const fd2 = new FormData();
+    fd2.set("intent", "fetch-creators");
+    creatorsFetcher.submit(fd2, { method: "post" });
+  }, [productsFetcher, creatorsFetcher]);
+
+  const handleToggleAssets = useCallback(() => {
+    const willOpen = !assetsOpen;
+    setAssetsOpen(willOpen);
+    if (willOpen && !assetsLoaded) {
+      handleLoadAssets();
+    }
+  }, [assetsOpen, assetsLoaded, handleLoadAssets]);
+
+  const handleSelectAsset = useCallback((id, checked) => {
+    setSelectedAssetIds(prev =>
+      checked ? [...prev, id] : prev.filter(x => x !== id)
+    );
+  }, []);
+
+  const handleSelectAll = useCallback((checked) => {
+    setSelectedAssetIds(checked ? products.map(p => p.numericId) : []);
+  }, [products]);
+
+  const handleRegisterAssets = useCallback((productList) => {
+    const creator = creators.find(c => (c.id || c.external_id || c.creator_id) === selectedCreator);
+    const creatorId = selectedCreator || undefined;
+    const creatorName = creator ? (creator.name || creator.display_name || creator.external_id || "") : undefined;
+
+    const assets = productList.map(p => ({
+      asset_id: p.assetId,
+      title: p.title,
+      skus: p.skus,
+      thumbnail_url: p.image || undefined,
+      creator_id: creatorId,
+      creator_name: creatorName,
+      metadata: { shopify_product_id: p.numericId, shopify_handle: p.handle },
+    }));
+
+    const fd = new FormData();
+    fd.set("intent", "register-assets");
+    fd.set("assets", JSON.stringify(assets));
+    registerFetcher.submit(fd, { method: "post" });
+  }, [selectedCreator, creators, registerFetcher]);
+
+  const handleBulkRegister = useCallback(() => {
+    const selected = products.filter(p => selectedAssetIds.includes(p.numericId));
+    if (selected.length) handleRegisterAssets(selected);
+  }, [products, selectedAssetIds, handleRegisterAssets]);
+
+  const creatorOptions = [
+    { label: "-- Select a creator --", value: "" },
+    ...creators.map(c => ({
+      label: c.name || c.display_name || c.external_id || c.id || "Unknown",
+      value: String(c.id || c.external_id || c.creator_id || ""),
+    })),
+  ];
 
   const handleFetchStats = useCallback((days) => {
     setStatsPeriod(days);
@@ -514,6 +701,140 @@ export default function OceDashboard() {
                   <Banner tone="critical">
                     {statsData.error || "Failed to load statistics"}
                   </Banner>
+                )}
+              </BlockStack>
+            </Collapsible>
+          </BlockStack>
+        </Card>
+
+        {/* ── Asset Registration ───────────────────────────────── */}
+        <Card>
+          <BlockStack gap="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="100">
+                <Text variant="headingMd" as="h2">Asset Registration</Text>
+                <Text variant="bodySm" tone="subdued">
+                  Register your store products as OCE video assets and assign them to creators
+                </Text>
+              </BlockStack>
+              <Button onClick={handleToggleAssets} variant="plain">
+                {assetsOpen ? "Collapse" : "Expand"}
+              </Button>
+            </InlineStack>
+            <Collapsible open={assetsOpen} id="assets-collapsible">
+              <BlockStack gap="400">
+                <Divider />
+                {assetsBanner && (
+                  <Banner tone={assetsBanner.tone} onDismiss={() => setAssetsBanner(null)}>
+                    {assetsBanner.message}
+                  </Banner>
+                )}
+                {assetsLoading && (
+                  <Box padding="400">
+                    <InlineStack align="center" gap="200">
+                      <Spinner size="small" />
+                      <Text variant="bodySm" tone="subdued">Loading products and creators...</Text>
+                    </InlineStack>
+                  </Box>
+                )}
+                {assetsLoaded && !assetsLoading && (
+                  <BlockStack gap="400">
+                    <InlineStack gap="400" blockAlign="end" wrap>
+                      <Box minWidth="220px">
+                        <Select
+                          label="Creator"
+                          options={creatorOptions}
+                          value={selectedCreator}
+                          onChange={setSelectedCreator}
+                        />
+                      </Box>
+                      <Button
+                        variant="primary"
+                        onClick={handleBulkRegister}
+                        disabled={selectedAssetIds.length === 0 || registering}
+                        loading={registering}
+                      >
+                        Register Selected ({selectedAssetIds.length})
+                      </Button>
+                      <Button onClick={handleLoadAssets} variant="secondary">
+                        Refresh
+                      </Button>
+                    </InlineStack>
+
+                    {products.length === 0 ? (
+                      <Box padding="400">
+                        <Text variant="bodySm" tone="subdued" alignment="center">
+                          No active products found in your store.
+                        </Text>
+                      </Box>
+                    ) : (
+                      <BlockStack gap="0">
+                        <Box padding="200" background="bg-surface-secondary" borderRadius="200">
+                          <InlineStack gap="300" blockAlign="center">
+                            <Checkbox
+                              label="Select all"
+                              checked={selectedAssetIds.length === products.length && products.length > 0}
+                              onChange={handleSelectAll}
+                            />
+                            <Text variant="bodySm" tone="subdued">
+                              {products.length} product{products.length !== 1 ? "s" : ""} found
+                            </Text>
+                          </InlineStack>
+                        </Box>
+                        {products.map((product) => (
+                          <Box key={product.numericId} padding="300" borderBlockEndWidth="025" borderColor="border">
+                            <InlineStack gap="400" blockAlign="center" wrap={false}>
+                              <Checkbox
+                                label=""
+                                labelHidden
+                                checked={selectedAssetIds.includes(product.numericId)}
+                                onChange={(checked) => handleSelectAsset(product.numericId, checked)}
+                              />
+                              <Thumbnail
+                                source={product.image || ""}
+                                alt={product.title}
+                                size="small"
+                              />
+                              <Box minWidth="0" maxWidth="100%">
+                                <BlockStack gap="050">
+                                  <Text variant="bodyMd" fontWeight="semibold" truncate>
+                                    {product.title}
+                                  </Text>
+                                  <Text variant="bodySm" tone="subdued">{product.assetId}</Text>
+                                  {product.skus.length > 0 && (
+                                    <InlineStack gap="100" wrap>
+                                      {product.skus.map((sku) => (
+                                        <Badge key={sku} tone="info">{sku}</Badge>
+                                      ))}
+                                    </InlineStack>
+                                  )}
+                                </BlockStack>
+                              </Box>
+                              <div style={{ marginLeft: "auto", flexShrink: 0 }}>
+                                <InlineStack gap="200" blockAlign="center">
+                                  {product.registered ? (
+                                    <Badge tone="success">
+                                      Registered{product.registeredCreatorName ? ` (${product.registeredCreatorName})` : ""}
+                                    </Badge>
+                                  ) : (
+                                    <Badge>Not registered</Badge>
+                                  )}
+                                  <Button
+                                    size="slim"
+                                    variant={product.registered ? "secondary" : "primary"}
+                                    onClick={() => handleRegisterAssets([product])}
+                                    loading={registering}
+                                  >
+                                    {product.registered ? "Update" : "Register"}
+                                  </Button>
+                                </InlineStack>
+                              </div>
+                            </InlineStack>
+                          </Box>
+                        ))}
+                      </BlockStack>
+                    )}
+                  </BlockStack>
                 )}
               </BlockStack>
             </Collapsible>
