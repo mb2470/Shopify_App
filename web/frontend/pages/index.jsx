@@ -302,6 +302,14 @@ export default function OceDashboard() {
   const assetsLoading = videosFetcher.state === "submitting" || creatorsFetcher.state === "submitting";
   const registering = registerFetcher.state === "submitting";
 
+  // ─── Manual Entry State ─────────────────────────────────────
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualAssetId, setManualAssetId] = useState("");
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualSkus, setManualSkus] = useState("");
+  const [manualCreator, setManualCreator] = useState("");
+  const [manualError, setManualError] = useState("");
+
   // Process fetcher responses
   useEffect(() => {
     if (videosFetcher.data?.videosResult?.ok) {
@@ -385,6 +393,35 @@ export default function OceDashboard() {
     const selected = videos.filter(v => selectedAssetIds.includes(v.assetId));
     if (selected.length) handleRegisterAssets(selected);
   }, [videos, selectedAssetIds, handleRegisterAssets]);
+
+  const handleManualRegister = useCallback(() => {
+    setManualError("");
+    if (!manualAssetId.trim()) {
+      setManualError("Asset ID is required");
+      return;
+    }
+    const skus = manualSkus.trim() ? manualSkus.split(",").map(s => s.trim()).filter(Boolean) : [];
+    const creatorId = manualCreator || selectedCreator || undefined;
+    const creator = creators.find(c => (c.id || c.external_id || c.creator_id) === creatorId);
+    const creatorName = creator ? (creator.name || creator.display_name || creator.external_id || "") : undefined;
+
+    const assets = [{
+      asset_id: manualAssetId.trim(),
+      title: manualTitle.trim() || manualAssetId.trim(),
+      skus,
+      creator_id: creatorId,
+      creator_name: creatorName,
+      metadata: { platform: "Manual", discovered_by: "manual" },
+    }];
+
+    const fd = new FormData();
+    fd.set("intent", "register-assets");
+    fd.set("assets", JSON.stringify(assets));
+    registerFetcher.submit(fd, { method: "post" });
+    setManualAssetId("");
+    setManualTitle("");
+    setManualSkus("");
+  }, [manualAssetId, manualTitle, manualSkus, manualCreator, selectedCreator, creators, registerFetcher]);
 
   const creatorOptions = [
     { label: "-- Select a creator --", value: "" },
@@ -933,6 +970,68 @@ export default function OceDashboard() {
                         ))}
                       </BlockStack>
                     )}
+
+                    {/* ── Manual Entry ──────────────────────────── */}
+                    <Divider />
+                    <Button
+                      onClick={() => setManualOpen(!manualOpen)}
+                      variant="plain"
+                      fullWidth
+                      textAlign="start"
+                    >
+                      {manualOpen ? "- Hide Manual Entry" : "+ Add Video Manually"}
+                    </Button>
+                    <Collapsible open={manualOpen} id="manual-entry-collapsible">
+                      <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                        <BlockStack gap="300">
+                          <InlineGrid columns={2} gap="300">
+                            <TextField
+                              label="Asset ID"
+                              value={manualAssetId}
+                              onChange={setManualAssetId}
+                              placeholder="e.g. my-video-001"
+                              requiredIndicator
+                              autoComplete="off"
+                              error={manualError || undefined}
+                            />
+                            <TextField
+                              label="Title"
+                              value={manualTitle}
+                              onChange={setManualTitle}
+                              placeholder="e.g. Product Demo Video"
+                              autoComplete="off"
+                            />
+                            <TextField
+                              label="SKUs (comma-separated)"
+                              value={manualSkus}
+                              onChange={setManualSkus}
+                              placeholder="e.g. SKU-001, SKU-002"
+                              autoComplete="off"
+                            />
+                            <Select
+                              label="Creator"
+                              options={[
+                                { label: "-- Use creator from above --", value: "" },
+                                ...creatorOptions.slice(1),
+                              ]}
+                              value={manualCreator}
+                              onChange={setManualCreator}
+                            />
+                          </InlineGrid>
+                          <InlineStack gap="200">
+                            <Button
+                              variant="primary"
+                              onClick={handleManualRegister}
+                              loading={registering}
+                              disabled={!manualAssetId.trim()}
+                              size="slim"
+                            >
+                              Register
+                            </Button>
+                          </InlineStack>
+                        </BlockStack>
+                      </Box>
+                    </Collapsible>
                   </BlockStack>
                 )}
               </BlockStack>
