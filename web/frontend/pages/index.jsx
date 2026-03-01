@@ -188,7 +188,7 @@ export async function action({ request }) {
           });
           if (storeRes.ok) {
             const html = await storeRes.text();
-            const tagRegex = /<[^>]+data-oce-asset-id="([^"]+)"[^>]*>/g;
+            const tagRegex = /<[^>]+data-oce-asset-id=["']([^"']+)["'][^>]*>/g;
             let tagMatch;
             const foundIds = new Set();
             while ((tagMatch = tagRegex.exec(html)) !== null) {
@@ -196,7 +196,7 @@ export async function action({ request }) {
               if (foundIds.has(assetId)) continue;
               foundIds.add(assetId);
               const tag = tagMatch[0];
-              const skuMatch = tag.match(/data-oce-sku="([^"]+)"/);
+              const skuMatch = tag.match(/data-oce-sku=["']([^"']+)["']/);
               storefrontVideos.push({
                 assetId,
                 title: assetId,
