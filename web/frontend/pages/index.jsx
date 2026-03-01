@@ -178,22 +178,62 @@ export async function action({ request }) {
           console.warn("[OCE] Failed to fetch Shopify video media:", err.message);
         }
 
+        // Source 3: Scan storefront for OCE-tagged video elements (custom Liquid)
+        let storefrontVideos = [];
+        try {
+          const storeRes = await fetch(`https://${shop}`, {
+            redirect: "follow",
+            headers: { "User-Agent": "Shopify-App-OCE/1.0" },
+            signal: AbortSignal.timeout(5000),
+          });
+          if (storeRes.ok) {
+            const html = await storeRes.text();
+            const tagRegex = /<[^>]+data-oce-asset-id="([^"]+)"[^>]*>/g;
+            let tagMatch;
+            const foundIds = new Set();
+            while ((tagMatch = tagRegex.exec(html)) !== null) {
+              const assetId = tagMatch[1];
+              if (foundIds.has(assetId)) continue;
+              foundIds.add(assetId);
+              const tag = tagMatch[0];
+              const skuMatch = tag.match(/data-oce-sku="([^"]+)"/);
+              storefrontVideos.push({
+                assetId,
+                title: assetId,
+                source: null,
+                thumbnail: null,
+                platform: "HTML5",
+                skus: skuMatch ? [skuMatch[1]] : [],
+                exposureCount: 0,
+                lastSeen: null,
+                discoveredBy: "storefront",
+              });
+            }
+          }
+        } catch (err) {
+          console.warn("[OCE] Failed to scan storefront:", err.message);
+        }
+
         // Merge + registered status
         const registered = await getRegisteredAssets(shop);
         const registeredMap = {};
         for (const ra of registered) registeredMap[ra.assetId] = ra;
         const seenIds = new Set(oceVideos.map(v => v.assetId));
-        const allVideos = [
-          ...oceVideos,
-          ...shopifyVideos.filter(v => !seenIds.has(v.assetId)),
-        ];
+        const allVideos = [...oceVideos];
+        for (const sv of shopifyVideos) {
+          if (!seenIds.has(sv.assetId)) { allVideos.push(sv); seenIds.add(sv.assetId); }
+        }
+        for (const sfv of storefrontVideos) {
+          if (!seenIds.has(sfv.assetId)) { allVideos.push(sfv); seenIds.add(sfv.assetId); }
+        }
         for (const ra of registered) {
-          if (!seenIds.has(ra.assetId) && !shopifyVideos.find(v => v.assetId === ra.assetId)) {
+          if (!seenIds.has(ra.assetId)) {
             allVideos.push({
               assetId: ra.assetId, title: ra.title || ra.assetId, source: ra.videoUrl,
               thumbnail: null, platform: detectPlatform(ra.assetId),
               skus: JSON.parse(ra.skus || "[]"), exposureCount: 0, lastSeen: null, discoveredBy: "registered",
             });
+            seenIds.add(ra.assetId);
           }
         }
         for (const v of allVideos) {
@@ -853,6 +893,7 @@ export default function OceDashboard() {
                                     <Badge tone="info">{video.platform || "Video"}</Badge>
                                     {video.discoveredBy === "sdk" && <Badge>SDK tracked</Badge>}
                                     {video.discoveredBy === "shopify" && <Badge>Shopify media</Badge>}
+                                    {video.discoveredBy === "storefront" && <Badge>Storefront</Badge>}
                                     {video.exposureCount > 0 && (
                                       <Text variant="bodySm" tone="subdued">
                                         {video.exposureCount} exposure{video.exposureCount !== 1 ? "s" : ""}
