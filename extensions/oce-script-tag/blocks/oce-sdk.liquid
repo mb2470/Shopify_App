@@ -148,7 +148,14 @@
           sku: sku || undefined
         })
       })
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        return r.json().then(function(data) {
+          if (!r.ok) {
+            throw new Error((data && data.error) || ('HTTP ' + r.status));
+          }
+          return data;
+        });
+      })
       .then(function(data) {
         if (data.exposure_id) {
           window.dispatchEvent(new CustomEvent('oce:exposure', {
@@ -158,6 +165,8 @@
               sku: sku
             }
           }));
+        } else {
+          console.warn('[OCE] Exposure response missing exposure_id for ' + assetId, data);
         }
       })
       .catch(function(err) {
