@@ -984,7 +984,8 @@ async function api(m,p,b){
   return resp.json();
 }
 function msg(t,m){const e=document.getElementById(t==="success"?"sb":"eb");e.textContent=m;e.style.display="block";setTimeout(()=>e.style.display="none",5000)}
-function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return'<span class="badge '+c+'">'+l+"</span>"}
+function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return{cls:"badge "+c,label:l,html:'<span class="badge '+c+'">'+l+"</span>"}}
+function setBadge(id,s){var b=bg(s);var el=document.getElementById(id);if(el){el.className=b.cls;el.textContent=b.label}}
 
 async function load(){
   try{
@@ -994,11 +995,11 @@ async function load(){
   }catch(e){console.log("Settings load pending auth")}
   try{
     const x=await api("GET","/api/settings/status");
-    document.getElementById("ob").outerHTML=bg(x.overall);
-    document.getElementById("sb1").outerHTML=bg(x.sdk.status);document.getElementById("sm1").textContent=x.sdk.message;
-    document.getElementById("sb2").outerHTML=bg(x.webhook.status);document.getElementById("sm2").textContent=x.webhook.message;
-    document.getElementById("sb3").outerHTML=bg(x.apiConnection.status);document.getElementById("sm3").textContent=x.apiConnection.message;
-    if(x.recentOrders&&x.recentOrders.length)document.getElementById("ro").innerHTML="<strong>Recent Orders</strong>"+x.recentOrders.map(o=>'<div class="o-row"><span>#'+o.shopifyOrderId+"</span>"+bg(o.status)+"</div>").join("");
+    setBadge("ob",x.overall);
+    setBadge("sb1",x.sdk.status);document.getElementById("sm1").textContent=x.sdk.message;
+    setBadge("sb2",x.webhook.status);document.getElementById("sm2").textContent=x.webhook.message;
+    setBadge("sb3",x.apiConnection.status);document.getElementById("sm3").textContent=x.apiConnection.message;
+    if(x.recentOrders&&x.recentOrders.length)document.getElementById("ro").innerHTML="<strong>Recent Orders</strong>"+x.recentOrders.map(o=>'<div class="o-row"><span>#'+o.shopifyOrderId+"</span>"+bg(o.status).html+"</div>").join("");
   }catch(e){console.log("Status load pending auth")}
 }
 
