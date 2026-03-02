@@ -28,6 +28,17 @@ import {
   getRegisteredAssets,
   getDiscoveredVideos,
 } from "./backend/routes/settings.js";
+import {
+  handleSignup,
+  handleVerify,
+  handleLogin,
+  handleResendCode,
+  handleGetProfile,
+  handleSubmitVideo,
+  handleGetVideos,
+  handleGetStats as handleCreatorStats,
+  renderPortalPage,
+} from "./backend/routes/creator-portal.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -299,6 +310,48 @@ app.post("/webhooks/app/uninstalled", async (req, res) => {
 app.post("/webhooks/customers/delete", (req, res) => res.status(200).send("OK"));
 app.post("/webhooks/customers/data-request", (req, res) => res.status(200).send("OK"));
 app.post("/webhooks/shop/delete", (req, res) => res.status(200).send("OK"));
+
+// ─── Creator Portal (App Proxy) ─────────────────────────────────
+// Shopify proxies /apps/onsite-affiliate/* → /proxy/*
+
+function verifyProxySignature(query) {
+  const { signature, ...params } = query;
+  if (!signature || !SHOPIFY_API_SECRET) return false;
+  const msg = Object.keys(params).sort().map(k => k + "=" + params[k]).join("");
+  const computed = crypto.createHmac("sha256", SHOPIFY_API_SECRET).update(msg).digest("hex");
+  try {
+    return crypto.timingSafeEqual(Buffer.from(computed, "hex"), Buffer.from(signature, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+const proxyRouter = express.Router();
+
+proxyRouter.use((req, res, next) => {
+  if (!verifyProxySignature(req.query)) {
+    console.warn("[Proxy] Signature verification failed for", req.query.shop, req.path);
+    return res.status(401).send("Unauthorized");
+  }
+  next();
+});
+
+proxyRouter.get("/", (req, res) => {
+  const pathPrefix = req.query.path_prefix || "/apps/onsite-affiliate";
+  res.set("Content-Type", "application/liquid");
+  res.send(renderPortalPage(pathPrefix));
+});
+
+proxyRouter.post("/api/signup", handleSignup);
+proxyRouter.post("/api/verify", handleVerify);
+proxyRouter.post("/api/login", handleLogin);
+proxyRouter.post("/api/resend-code", handleResendCode);
+proxyRouter.get("/api/me", handleGetProfile);
+proxyRouter.post("/api/submit-video", handleSubmitVideo);
+proxyRouter.get("/api/videos", handleGetVideos);
+proxyRouter.get("/api/stats", handleCreatorStats);
+
+app.use("/proxy", proxyRouter);
 
 // ─── Auth Middleware ──────────────────────────────────────────────
 
