@@ -364,7 +364,67 @@ function verifyProxySignature(query) {
 
 const proxyRouter = express.Router();
 
+function getProxyShopDomain(req) {
+  return req.query.shop || req.headers["x-shopify-shop-domain"] || req.headers["x-shop-domain"];
+}
+
+async function handleProxyExposure(req, res) {
+  const shopDomain = getProxyShopDomain(req);
+  if (!shopDomain) {
+    console.warn("[OCE] Proxy exposure missing shop domain", {
+      queryShop: req.query.shop,
+      headerShopify: req.headers["x-shopify-shop-domain"],
+      headerShop: req.headers["x-shop-domain"],
+      path: req.path,
+    });
+    return res.status(400).json({ error: "Missing shop domain" });
+  }
+
+  const settings = await prisma.oceSettings.findUnique({ where: { shop: shopDomain } });
+  if (!settings?.apiKey) {
+    console.warn("[OCE] Proxy exposure skipped: OCE API key not configured for", shopDomain);
+    return res.status(500).json({ error: "OCE not configured" });
+  }
+
+  const { asset_id, session_id, sku, creator_external_id } = req.body || {};
+  if (!asset_id || !session_id) {
+    console.warn("[OCE] Proxy exposure invalid payload", { shop: shopDomain, body: req.body });
+    return res.status(400).json({ error: "asset_id and session_id required" });
+  }
+
+  try {
+    const oceApi = new OceApiService(settings.apiKey);
+    const result = await oceApi.createExposure({
+      assetId: asset_id,
+      sessionId: session_id,
+      sku: sku || undefined,
+      creatorExternalId: creator_external_id || undefined,
+    });
+    console.log("[OCE] Proxy exposure created", {
+      shop: shopDomain,
+      asset_id,
+      exposure_id: result?.exposure_id,
+    });
+    return res.json(result);
+  } catch (err) {
+    console.error("[OCE] Proxy exposure error", {
+      shop: shopDomain,
+      asset_id,
+      message: err.message,
+      statusCode: err.statusCode,
+      responseBody: err.responseBody,
+    });
+    return res.status(500).json({
+      error: "Failed to create exposure",
+      detail: err.responseBody || err.message,
+    });
+  }
+}
+
 proxyRouter.use((req, res, next) => {
+  if (req.path === "/exposure") {
+    return next();
+  }
   if (!verifyProxySignature(req.query)) {
     console.warn("[Proxy] Signature verification failed for", req.query.shop, req.path);
     return res.status(401).send("Unauthorized");
@@ -387,7 +447,13 @@ proxyRouter.post("/api/submit-video", handleSubmitVideo);
 proxyRouter.get("/api/videos", handleGetVideos);
 proxyRouter.get("/api/stats", handleCreatorStats);
 
+proxyRouter.post("/exposure", handleProxyExposure);
+
 app.use("/proxy", proxyRouter);
+
+// Legacy fallback: accept direct /proxy/exposure requests even when Shopify app-proxy
+// signing/query parameters are omitted by theme/custom JS clients.
+app.post("/proxy/exposure", express.json(), handleProxyExposure);
 
 // ─── Auth Middleware ──────────────────────────────────────────────
 
@@ -477,34 +543,6 @@ async function authenticate(req, res, next) {
     res.status(500).json({ error: "Authentication error", detail: err.message });
   }
 }
-
-// ─── App Proxy Routes ─────────────────────────────────────────────
-// Shopify proxies {shop}/apps/onsite-affiliate/* → /proxy/*
-
-app.post("/proxy/exposure", express.json(), async (req, res) => {
-  const shopDomain = req.headers["x-shopify-shop-domain"];
-  if (!shopDomain) return res.status(400).json({ error: "Missing shop domain" });
-
-  const settings = await prisma.oceSettings.findUnique({ where: { shop: shopDomain } });
-  if (!settings?.apiKey) return res.status(500).json({ error: "OCE not configured" });
-
-  const { asset_id, session_id, sku, creator_external_id } = req.body;
-  if (!asset_id || !session_id) return res.status(400).json({ error: "asset_id and session_id required" });
-
-  try {
-    const oceApi = new OceApiService(settings.apiKey);
-    const result = await oceApi.createExposure({
-      assetId: asset_id,
-      sessionId: session_id,
-      sku: sku || undefined,
-      creatorExternalId: creator_external_id || undefined,
-    });
-    res.json(result);
-  } catch (err) {
-    console.error("[OCE] Proxy exposure error:", err.message);
-    res.status(500).json({ error: "Failed to create exposure" });
-  }
-});
 
 // ─── API Routes ───────────────────────────────────────────────────
 

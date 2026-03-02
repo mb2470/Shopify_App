@@ -19,6 +19,7 @@
     'use strict';
 
     var PROXY_URL = '/apps/onsite-affiliate/exposure';
+    var FALLBACK_PROXY_URL = '/proxy/exposure';
     var tracked = {}; // asset_id → true, prevents duplicate exposures per session
 
     // ── Session / storage helpers ──────────────────────────────────
@@ -139,16 +140,35 @@
 
       var sku = skuAttr || '';
 
-      fetch(PROXY_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          asset_id: assetId,
-          session_id: getSessionId(),
-          sku: sku || undefined
-        })
+      var payload = {
+        asset_id: assetId,
+        session_id: getSessionId(),
+        sku: sku || undefined
+      };
+
+      function postExposure(url) {
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function(r) {
+          return r.text().then(function(text) {
+            var data = {};
+            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { raw: text }; }
+            if (!r.ok) {
+              var detail = (data && (data.detail || data.error)) || ('HTTP ' + r.status);
+              throw new Error(detail);
+            }
+            return data;
+          });
+        });
+      }
+
+      postExposure(PROXY_URL)
+      .catch(function(err) {
+        console.warn('[OCE] Primary proxy failed for ' + assetId + ', retrying fallback:', err);
+        return postExposure(FALLBACK_PROXY_URL);
       })
-      .then(function(r) { return r.json(); })
       .then(function(data) {
         if (data.exposure_id) {
           window.dispatchEvent(new CustomEvent('oce:exposure', {
@@ -158,6 +178,8 @@
               sku: sku
             }
           }));
+        } else {
+          console.warn('[OCE] Exposure response missing exposure_id for ' + assetId, data);
         }
       })
       .catch(function(err) {
