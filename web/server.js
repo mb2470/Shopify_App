@@ -350,13 +350,33 @@ app.post("/webhooks/shop/delete", (req, res) => res.status(200).send("OK"));
 // ─── Creator Portal (App Proxy) ─────────────────────────────────
 // Shopify proxies /apps/onsite-affiliate/* → /proxy/*
 
-function verifyProxySignature(query) {
-  const { signature, ...params } = query;
-  if (!signature || !SHOPIFY_API_SECRET) return false;
-  const msg = Object.keys(params).sort().map(k => k + "=" + params[k]).join("");
-  const computed = crypto.createHmac("sha256", SHOPIFY_API_SECRET).update(msg).digest("hex");
+function verifyProxySignature(req) {
+  if (!SHOPIFY_API_SECRET) return false;
+
+  // Shopify App Proxy has historically used `signature`, but some deployments
+  // can send `hmac` instead. Support both to avoid silently dropping requests.
+  const incomingSignature = req.query.signature || req.query.hmac;
+  if (!incomingSignature) return false;
+
+  const fullUrl = new URL(`${SHOPIFY_APP_URL || "https://localhost"}${req.originalUrl}`);
+  const params = [];
+
+  for (const [key, value] of fullUrl.searchParams.entries()) {
+    if (key === "signature" || key === "hmac") continue;
+    params.push(`${key}=${value}`);
+  }
+
+  const msg = params.sort().join("");
+  const computed = crypto
+    .createHmac("sha256", SHOPIFY_API_SECRET)
+    .update(msg)
+    .digest("hex");
+
   try {
-    return crypto.timingSafeEqual(Buffer.from(computed, "hex"), Buffer.from(signature, "hex"));
+    return crypto.timingSafeEqual(
+      Buffer.from(computed, "hex"),
+      Buffer.from(String(incomingSignature), "hex")
+    );
   } catch {
     return false;
   }
@@ -365,9 +385,14 @@ function verifyProxySignature(query) {
 const proxyRouter = express.Router();
 
 proxyRouter.use((req, res, next) => {
-  if (!verifyProxySignature(req.query)) {
-    console.warn("[Proxy] Signature verification failed for", req.query.shop, req.path);
-    return res.status(401).send("Unauthorized");
+  if (!verifyProxySignature(req)) {
+    console.warn("[Proxy] Signature verification failed", {
+      shop: req.query.shop,
+      path: req.path,
+      hasSignature: Boolean(req.query.signature || req.query.hmac),
+      queryKeys: Object.keys(req.query || {}),
+    });
+    return res.status(401).json({ error: "Invalid app proxy signature" });
   }
   next();
 });
@@ -423,8 +448,17 @@ proxyRouter.post("/exposure", async (req, res) => {
     });
     res.json(result);
   } catch (err) {
-    console.error("[OCE] Proxy exposure error:", err.message);
-    res.status(500).json({ error: "Failed to create exposure" });
+    console.error("[OCE] Proxy exposure error:", {
+      message: err.message,
+      statusCode: err.statusCode,
+      responseBody: err.responseBody,
+      asset_id,
+      shop: shopDomain,
+    });
+    res.status(500).json({
+      error: "Failed to create exposure",
+      details: err.responseBody || err.message,
+    });
   }
 });
 
