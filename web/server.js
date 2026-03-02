@@ -252,15 +252,30 @@ async function registerWebhooks(shop, accessToken) {
 app.post("/webhooks/orders/create", async (req, res) => {
   const hmacHeader = req.headers["x-shopify-hmac-sha256"];
   const shop = req.headers["x-shopify-shop-domain"];
+
+  console.log("[Webhook] Received orders/create from", shop || "unknown",
+    "| body size:", req.body?.length || 0,
+    "| hmac present:", !!hmacHeader);
+
   if (!hmacHeader || !verifyWebhookHmac(req.body, hmacHeader)) {
+    console.error("[Webhook] HMAC verification FAILED for", shop,
+      "| secret set:", !!SHOPIFY_API_SECRET,
+      "| secret length:", (SHOPIFY_API_SECRET || "").length,
+      "| body type:", typeof req.body,
+      "| body is Buffer:", Buffer.isBuffer(req.body));
     return res.status(401).send("Unauthorized");
   }
+
+  console.log("[Webhook] HMAC verified OK for", shop);
   res.status(200).send("OK");
+
   try {
     const orderData = JSON.parse(req.body.toString());
+    console.log("[Webhook] Order", orderData.id, "| total:", orderData.total_price,
+      "| note_attributes:", JSON.stringify(orderData.note_attributes || []));
     await handleOrderCreated(shop, orderData);
   } catch (error) {
-    console.error("[Webhook] orders/create error:", error);
+    console.error("[Webhook] orders/create processing error:", error);
   }
 });
 
@@ -431,6 +446,40 @@ app.get("/api/debug/metafields", authenticate, async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error("[OCE] Debug metafields error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/debug/webhooks", authenticate, async (req, res) => {
+  try {
+    const shopApi = `https://${req.shop}/admin/api/2024-10`;
+    const response = await fetch(`${shopApi}/webhooks.json`, {
+      headers: { "X-Shopify-Access-Token": req.session.accessToken },
+    });
+    const data = await response.json();
+    const webhooks = (data.webhooks || []).map((w) => ({
+      id: w.id,
+      topic: w.topic,
+      address: w.address,
+      format: w.format,
+      created_at: w.created_at,
+      updated_at: w.updated_at,
+    }));
+    const orderWebhook = webhooks.find((w) => w.topic === "orders/create");
+    res.json({
+      ok: true,
+      expectedAddress: `${SHOPIFY_APP_URL}/webhooks/orders/create`,
+      orderWebhook: orderWebhook || null,
+      addressMatch: orderWebhook?.address === `${SHOPIFY_APP_URL}/webhooks/orders/create`,
+      allWebhooks: webhooks,
+      serverConfig: {
+        SHOPIFY_APP_URL: SHOPIFY_APP_URL || "NOT SET",
+        SHOPIFY_API_SECRET_set: !!SHOPIFY_API_SECRET,
+        SHOPIFY_API_SECRET_length: (SHOPIFY_API_SECRET || "").length,
+      },
+    });
+  } catch (err) {
+    console.error("[OCE] Debug webhooks error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -753,7 +802,7 @@ function getAdminHTML(shop, host) {
   <div class="card"><div class="card-row"><h2>Integration Status</h2><span id="ob" class="badge b-info">Loading...</span></div>
     <div class="grid-3">
       <div class="status-box"><h3>🔗 SDK Script</h3><span id="sb1" class="badge b-info">—</span><p id="sm1" style="font-size:12px;color:#6d7175;margin-top:6px"></p></div>
-      <div class="status-box"><h3>📦 Order Webhook</h3><span id="sb2" class="badge b-info">—</span><p id="sm2" style="font-size:12px;color:#6d7175;margin-top:6px"></p></div>
+      <div class="status-box"><h3>📦 Order Webhook</h3><span id="sb2" class="badge b-info">—</span><p id="sm2" style="font-size:12px;color:#6d7175;margin-top:6px"></p><button class="btn btn-link" style="font-size:11px;padding:2px 4px;margin-top:4px" onclick="debugWebhook()">Diagnose</button><pre id="wh-debug" style="display:none;font-size:11px;background:#1e2124;color:#95c7f3;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap;max-height:200px;overflow:auto"></pre></div>
       <div class="status-box"><h3>📡 API Connection</h3><span id="sb3" class="badge b-info">—</span><p id="sm3" style="font-size:12px;color:#6d7175;margin-top:6px"></p></div>
     </div>
   </div>
@@ -956,7 +1005,8 @@ async function api(m,p,b){
   return resp.json();
 }
 function msg(t,m){const e=document.getElementById(t==="success"?"sb":"eb");e.textContent=m;e.style.display="block";setTimeout(()=>e.style.display="none",5000)}
-function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return'<span class="badge '+c+'">'+l+"</span>"}
+function bg(s){const m={active:["b-ok","Active"],connected:["b-ok","Connected"],healthy:["b-ok","Healthy"],disabled:["b-warn","Disabled"],inactive:["b-err","Inactive"],error:["b-err","Error"],not_configured:["b-warn","Not Configured"]};const[c,l]=m[s]||["b-info",s];return{cls:"badge "+c,label:l,html:'<span class="badge '+c+'">'+l+"</span>"}}
+function setBadge(id,s){var b=bg(s);var el=document.getElementById(id);if(el){el.className=b.cls;el.textContent=b.label}}
 
 async function load(){
   try{
@@ -966,12 +1016,36 @@ async function load(){
   }catch(e){console.log("Settings load pending auth")}
   try{
     const x=await api("GET","/api/settings/status");
-    document.getElementById("ob").outerHTML=bg(x.overall);
-    document.getElementById("sb1").outerHTML=bg(x.sdk.status);document.getElementById("sm1").textContent=x.sdk.message;
-    document.getElementById("sb2").outerHTML=bg(x.webhook.status);document.getElementById("sm2").textContent=x.webhook.message;
-    document.getElementById("sb3").outerHTML=bg(x.apiConnection.status);document.getElementById("sm3").textContent=x.apiConnection.message;
-    if(x.recentOrders&&x.recentOrders.length)document.getElementById("ro").innerHTML="<strong>Recent Orders</strong>"+x.recentOrders.map(o=>'<div class="o-row"><span>#'+o.shopifyOrderId+"</span>"+bg(o.status)+"</div>").join("");
+    setBadge("ob",x.overall);
+    setBadge("sb1",x.sdk.status);document.getElementById("sm1").textContent=x.sdk.message;
+    setBadge("sb2",x.webhook.status);document.getElementById("sm2").textContent=x.webhook.message;
+    setBadge("sb3",x.apiConnection.status);document.getElementById("sm3").textContent=x.apiConnection.message;
+    if(x.recentOrders&&x.recentOrders.length)document.getElementById("ro").innerHTML="<strong>Recent Orders</strong>"+x.recentOrders.map(o=>'<div class="o-row"><span>#'+o.shopifyOrderId+"</span>"+bg(o.status).html+"</div>").join("");
   }catch(e){console.log("Status load pending auth")}
+}
+
+async function debugWebhook(){
+  var el=document.getElementById("wh-debug");
+  el.style.display="block";el.textContent="Checking...";
+  try{
+    var r=await api("GET","/api/debug/webhooks");
+    var lines=[];
+    lines.push("Webhook URL expected: "+r.expectedAddress);
+    if(r.orderWebhook){
+      lines.push("Webhook registered:   "+r.orderWebhook.address);
+      lines.push("Address match:        "+(r.addressMatch?"YES":"NO — MISMATCH!"));
+      lines.push("Last updated:         "+r.orderWebhook.updated_at);
+    }else{
+      lines.push("ORDER WEBHOOK NOT FOUND in Shopify!");
+      lines.push("Available webhooks: "+r.allWebhooks.map(function(w){return w.topic}).join(", "));
+    }
+    lines.push("");
+    lines.push("Server config:");
+    lines.push("  SHOPIFY_APP_URL:    "+r.serverConfig.SHOPIFY_APP_URL);
+    lines.push("  API_SECRET set:     "+r.serverConfig.SHOPIFY_API_SECRET_set);
+    lines.push("  API_SECRET length:  "+r.serverConfig.SHOPIFY_API_SECRET_length);
+    el.textContent=lines.join("\\n");
+  }catch(e){el.textContent="Error: "+e.message}
 }
 
 async function saveKey(){
@@ -1040,8 +1114,8 @@ async function loadStats(days){
 }
 
 function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on");else e.classList.remove("on")}
-function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none"}
-function tWh(){st.wh=!st.wh;tog("wt",st.wh)}
+async function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none";try{await api("PUT","/api/settings",{sdkEnabled:st.sdk})}catch(e){console.error("Toggle SDK error:",e);st.sdk=!st.sdk;tog("st",st.sdk)}}
+async function tWh(){st.wh=!st.wh;tog("wt",st.wh);try{await api("PUT","/api/settings",{webhookEnabled:st.wh})}catch(e){console.error("Toggle webhook error:",e);st.wh=!st.wh;tog("wt",st.wh)}}
 
 // ── Video Asset Registration ──
 let assetsOpen=false;
