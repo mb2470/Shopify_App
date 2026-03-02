@@ -124,10 +124,13 @@ function extractVideoSettings(id, type, settings, videos, foundIds) {
     }
   }
 
-  // video setting — Shopify-hosted video reference
+  // video setting — Shopify-hosted video reference (e.g. "shopify://videos/28841836175599")
   if (settings.video && typeof settings.video === "string") {
     const ref = settings.video;
-    const assetId = `shopify-theme-video-${id}`;
+    const videoIdMatch = ref.match(/shopify:\/\/videos\/(\d+)/);
+    const assetId = videoIdMatch
+      ? `shopify-video-${videoIdMatch[1]}`
+      : `shopify-theme-video-${id}`;
     const title =
       settings.heading ||
       settings.description ||
