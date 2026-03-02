@@ -152,13 +152,11 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
-        }).then(function(r) {
-          return r.text().then(function(text) {
-            var data = {};
-            try { data = text ? JSON.parse(text) : {}; } catch(e) { data = { raw: text }; }
+        })
+        .then(function(r) {
+          return r.json().then(function(data) {
             if (!r.ok) {
-              var detail = (data && (data.detail || data.error)) || ('HTTP ' + r.status);
-              throw new Error(detail);
+              throw new Error((data && (data.detail || data.error)) || ('HTTP ' + r.status));
             }
             return data;
           });

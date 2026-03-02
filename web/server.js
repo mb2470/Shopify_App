@@ -447,7 +447,9 @@ proxyRouter.post("/api/submit-video", handleSubmitVideo);
 proxyRouter.get("/api/videos", handleGetVideos);
 proxyRouter.get("/api/stats", handleCreatorStats);
 
-proxyRouter.post("/exposure", handleProxyExposure);
+proxyRouter.post("/exposure", async (req, res) => {
+  return handleProxyExposure(req, res);
+});
 
 app.use("/proxy", proxyRouter);
 
