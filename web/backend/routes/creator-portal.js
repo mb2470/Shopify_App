@@ -119,8 +119,7 @@ export async function handleSignup(req, res) {
 
     res.json({
       ok: true,
-      message: "Account created. Enter the verification code to continue.",
-      verificationCode: code,
+      message: "Account created. Check your email for the verification code.",
     });
   } catch (error) {
     console.error("[Creator] Signup error:", error);
@@ -253,8 +252,7 @@ export async function handleResendCode(req, res) {
 
     res.json({
       ok: true,
-      message: "New verification code generated.",
-      verificationCode: code,
+      message: "New verification code sent. Check your email.",
     });
   } catch (error) {
     console.error("[Creator] Resend code error:", error);
@@ -407,8 +405,6 @@ export function renderPortalPage(pathPrefix) {
   #oce-portal .badge-approved{background:#d4edda;color:#155724}
   #oce-portal .badge-rejected{background:#f8d7da;color:#721c24}
   #oce-portal .empty-state{text-align:center;padding:32px;color:#8c9196;font-size:14px}
-  #oce-portal .dev-code{background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;margin:12px 0;text-align:center;font-size:13px}
-  #oce-portal .dev-code strong{font-size:24px;letter-spacing:6px;display:block;margin-top:4px;color:#1a1a2e}
   #oce-portal .top-bar{display:flex;justify-content:space-between;align-items:center}
   #oce-portal .top-bar .btn-logout{background:none;border:1px solid #c9cccf;border-radius:8px;padding:8px 16px;font-size:13px;color:#6d7175;cursor:pointer}
   #oce-portal .top-bar .btn-logout:hover{background:#f6f6f7}
@@ -475,9 +471,6 @@ export function renderPortalPage(pathPrefix) {
     </div>
 
     <div class="portal-card">
-      <div id="dev-code-box" class="dev-code" style="display:none">
-        Your verification code:<strong id="dev-code-val"></strong>
-      </div>
       <form onsubmit="oceVerify(event)">
         <div class="form-group">
           <label for="v-code">Verification Code</label>
@@ -614,11 +607,6 @@ export function renderPortalPage(pathPrefix) {
       }
       creatorEmail = $('s-email').value.trim().toLowerCase();
       $('verify-email-show').textContent = creatorEmail;
-
-      if(r.verificationCode){
-        $('dev-code-box').style.display = 'block';
-        $('dev-code-val').textContent = r.verificationCode;
-      }
       showView('verify');
     }).catch(function(){
       btn.disabled = false;
@@ -663,10 +651,6 @@ export function renderPortalPage(pathPrefix) {
         showErr('verify-err', r.error);
         return;
       }
-      if(r.verificationCode){
-        $('dev-code-box').style.display = 'block';
-        $('dev-code-val').textContent = r.verificationCode;
-      }
       hideErr('verify-err');
     });
   };
@@ -688,7 +672,8 @@ export function renderPortalPage(pathPrefix) {
       if(r.needsVerification){
         creatorEmail = $('l-email').value.trim().toLowerCase();
         $('verify-email-show').textContent = creatorEmail;
-        showErr('login-err', r.error);
+        showView('verify');
+        oceResend();
         return;
       }
       if(r.error){
