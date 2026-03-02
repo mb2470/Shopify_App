@@ -20,7 +20,7 @@
 
     var PROXY_URL = '/apps/onsite-affiliate/exposure';
     var FALLBACK_PROXY_URL = '/proxy/exposure';
-    var tracked = {}; // asset_id → true, prevents duplicate exposures per session
+    var tracked = {}; // asset_id → 'pending'|'sent', prevents dupes while allowing retry on failure
 
     // ── Session / storage helpers ──────────────────────────────────
 
@@ -135,8 +135,9 @@
     // ── Exposure creation ────────────────────────────────────────
 
     function fireExposure(assetId, skuAttr) {
-      if (!assetId || tracked[assetId]) return;
-      tracked[assetId] = true;
+      if (!assetId) return;
+      if (tracked[assetId] === 'pending' || tracked[assetId] === 'sent') return;
+      tracked[assetId] = 'pending';
 
       var sku = skuAttr || '';
 
@@ -171,6 +172,7 @@
       })
       .then(function(data) {
         if (data.exposure_id) {
+          tracked[assetId] = 'sent';
           window.dispatchEvent(new CustomEvent('oce:exposure', {
             detail: {
               exposure_id: data.exposure_id,
@@ -179,10 +181,12 @@
             }
           }));
         } else {
+          tracked[assetId] = undefined;
           console.warn('[OCE] Exposure response missing exposure_id for ' + assetId, data);
         }
       })
       .catch(function(err) {
+        tracked[assetId] = undefined;
         console.warn('[OCE] Exposure creation failed for ' + assetId + ':', err);
       });
     }
