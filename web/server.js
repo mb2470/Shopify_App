@@ -241,9 +241,10 @@ async function registerWebhooks(shop, accessToken) {
     { topic: "app/uninstalled", address: `${SHOPIFY_APP_URL}/webhooks/app/uninstalled` },
   ];
 
+  const results = [];
   for (const wh of webhooks) {
     try {
-      await fetch(`https://${shop}/admin/api/2024-10/webhooks.json`, {
+      const resp = await fetch(`https://${shop}/admin/api/2024-10/webhooks.json`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -251,11 +252,21 @@ async function registerWebhooks(shop, accessToken) {
         },
         body: JSON.stringify({ webhook: { topic: wh.topic, address: wh.address, format: "json" } }),
       });
-      console.log(`[Webhook] Registered ${wh.topic} for ${shop}`);
+      const data = await resp.json();
+      if (data.webhook) {
+        console.log(`[Webhook] Registered ${wh.topic} for ${shop} (id: ${data.webhook.id})`);
+        results.push({ topic: wh.topic, status: "registered", id: data.webhook.id });
+      } else {
+        const errMsg = JSON.stringify(data.errors || data);
+        console.error(`[Webhook] Failed ${wh.topic} for ${shop}: ${errMsg}`);
+        results.push({ topic: wh.topic, status: "failed", error: errMsg });
+      }
     } catch (error) {
       console.error(`[Webhook] Failed ${wh.topic}:`, error.message);
+      results.push({ topic: wh.topic, status: "error", error: error.message });
     }
   }
+  return results;
 }
 
 // ─── Webhook Endpoints ────────────────────────────────────────────
@@ -561,6 +572,17 @@ app.get("/api/debug/webhooks", authenticate, async (req, res) => {
     });
   } catch (err) {
     console.error("[OCE] Debug webhooks error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/webhooks/register", authenticate, async (req, res) => {
+  try {
+    console.log("[Webhook] Manual registration triggered for", req.shop);
+    const results = await registerWebhooks(req.shop, req.session.accessToken);
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error("[Webhook] Manual registration error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -883,7 +905,7 @@ function getAdminHTML(shop, host) {
   <div class="card"><div class="card-row"><h2>Integration Status</h2><span id="ob" class="badge b-info">Loading...</span></div>
     <div class="grid-3">
       <div class="status-box"><h3>🔗 SDK Script</h3><span id="sb1" class="badge b-info">—</span><p id="sm1" style="font-size:12px;color:#6d7175;margin-top:6px"></p></div>
-      <div class="status-box"><h3>📦 Order Webhook</h3><span id="sb2" class="badge b-info">—</span><p id="sm2" style="font-size:12px;color:#6d7175;margin-top:6px"></p><button class="btn btn-link" style="font-size:11px;padding:2px 4px;margin-top:4px" onclick="debugWebhook()">Diagnose</button><pre id="wh-debug" style="display:none;font-size:11px;background:#1e2124;color:#95c7f3;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap;max-height:200px;overflow:auto"></pre></div>
+      <div class="status-box"><h3>📦 Order Webhook</h3><span id="sb2" class="badge b-info">—</span><p id="sm2" style="font-size:12px;color:#6d7175;margin-top:6px"></p><button class="btn btn-link" style="font-size:11px;padding:2px 4px;margin-top:4px" onclick="debugWebhook()">Diagnose</button><pre id="wh-debug" style="display:none;font-size:11px;background:#1e2124;color:#95c7f3;padding:8px;border-radius:6px;margin-top:6px;white-space:pre-wrap;max-height:200px;overflow:auto"></pre><button id="wh-register-btn" class="btn" style="display:none;margin-top:6px;background:#d72c0d;color:#fff;font-size:12px;padding:6px 12px" onclick="registerWebhooks()">Register Now</button></div>
       <div class="status-box"><h3>📡 API Connection</h3><span id="sb3" class="badge b-info">—</span><p id="sm3" style="font-size:12px;color:#6d7175;margin-top:6px"></p></div>
     </div>
   </div>
@@ -1119,6 +1141,8 @@ async function debugWebhook(){
     }else{
       lines.push("ORDER WEBHOOK NOT FOUND in Shopify!");
       lines.push("Available webhooks: "+r.allWebhooks.map(function(w){return w.topic}).join(", "));
+      lines.push("");
+      lines.push("Click 'Register Now' below to fix this.");
     }
     lines.push("");
     lines.push("Server config:");
@@ -1126,7 +1150,25 @@ async function debugWebhook(){
     lines.push("  API_SECRET set:     "+r.serverConfig.SHOPIFY_API_SECRET_set);
     lines.push("  API_SECRET length:  "+r.serverConfig.SHOPIFY_API_SECRET_length);
     el.textContent=lines.join("\\n");
+    var regBtn=document.getElementById("wh-register-btn");
+    if(regBtn) regBtn.style.display=r.orderWebhook?"none":"inline-block";
   }catch(e){el.textContent="Error: "+e.message}
+}
+
+async function registerWebhooks(){
+  var btn=document.getElementById("wh-register-btn");
+  btn.disabled=true;btn.textContent="Registering...";
+  try{
+    var r=await api("POST","/api/webhooks/register");
+    btn.textContent="Register Now";btn.disabled=false;
+    if(r.ok){
+      var msgs=r.results.map(function(x){return x.topic+": "+x.status+(x.error?" ("+x.error+")":"")});
+      alert("Webhook registration results:\\n\\n"+msgs.join("\\n"));
+      debugWebhook();
+    }else{
+      alert("Registration failed: "+(r.error||"Unknown error"));
+    }
+  }catch(e){btn.textContent="Register Now";btn.disabled=false;alert("Error: "+e.message)}
 }
 
 async function saveKey(){
