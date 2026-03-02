@@ -360,13 +360,24 @@ export function renderPortalPage(pathPrefix) {
 
   return `
 <style>
-  #oce-portal{max-width:720px;margin:40px auto;padding:0 16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1a1a2e}
+  #oce-portal{max-width:980px;margin:40px auto;padding:0 16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#1a1a2e}
   #oce-portal *{box-sizing:border-box}
   #oce-portal h1{font-size:28px;font-weight:700;margin:0 0 8px}
   #oce-portal h2{font-size:20px;font-weight:600;margin:0 0 16px}
   #oce-portal p{margin:0 0 8px;color:#6d7175}
   #oce-portal .portal-header{margin-bottom:24px}
+  #oce-portal .auth-layout{display:grid;grid-template-columns:1.2fr .9fr;gap:24px;align-items:start}
+  @media(max-width:860px){#oce-portal .auth-layout{grid-template-columns:1fr}}
+  #oce-portal .benefits{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}
+  @media(max-width:600px){#oce-portal .benefits{grid-template-columns:1fr}}
+  #oce-portal .benefit-card{background:#fff;border:1px solid #e1e3e5;border-radius:12px;padding:14px}
+  #oce-portal .benefit-card h3{font-size:15px;margin:0 0 6px}
+  #oce-portal .benefit-card p{font-size:13px;margin:0;color:#4b4f54}
+  #oce-portal .terms-list{margin:12px 0 0;padding:0;list-style:none;display:grid;gap:10px}
+  #oce-portal .terms-list li{display:grid;grid-template-columns:28px 1fr;gap:8px;align-items:start;color:#4b4f54;font-size:13px}
+  #oce-portal .terms-icon{font-size:18px;line-height:1.2;text-align:center}
   #oce-portal .portal-card{background:#fff;border:1px solid #e1e3e5;border-radius:12px;padding:24px;margin-bottom:24px;box-shadow:0 1px 3px rgba(0,0,0,.08)}
+  #oce-portal .portal-card h2{margin-bottom:4px}
   #oce-portal .tabs{display:flex;gap:0;margin-bottom:20px;border-bottom:2px solid #e1e3e5}
   #oce-portal .tab{background:none;border:none;padding:10px 20px;font-size:15px;font-weight:600;color:#6d7175;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s}
   #oce-portal .tab.active{color:#008060;border-bottom-color:#008060}
@@ -416,12 +427,39 @@ export function renderPortalPage(pathPrefix) {
 
   <!-- ── Auth View ──────────────────────────────────────── -->
   <div id="auth-view" class="portal-view">
-    <div class="portal-header" style="text-align:center">
-      <h1>Onsite Affiliate Program</h1>
-      <p>Join our creator program and earn commission on every sale your content drives.</p>
-    </div>
+    <div class="auth-layout">
+      <div class="portal-header">
+        <h1>Join <span class="store-name">this store</span> as an Onsite Creator</h1>
+        <p>Upload engaging video content about our products and if we place it on our site you can earn commissions on every sale that your videos help drive.</p>
+        <p>Log back in here to track your performance and get paid your commissions.</p>
 
-    <div class="portal-card">
+        <div class="benefits">
+          <div class="benefit-card">
+            <h3>Upload Your Content</h3>
+            <p>Share your product videos and we will track every view, click, and engagement.</p>
+          </div>
+          <div class="benefit-card">
+            <h3>Real-Time Analytics</h3>
+            <p>See exactly how your video content performs with detailed attribution insights.</p>
+          </div>
+          <div class="benefit-card">
+            <h3>Earn Commissions</h3>
+            <p>Get paid for every sale attributed to your content. Transparent payouts, always.</p>
+          </div>
+        </div>
+
+        <h2>Key Terms Summary</h2>
+        <ul class="terms-list">
+          <li><span class="terms-icon">📄</span><span>You retain ownership of your video content. You grant us a license to sublicense for ecommerce placements.</span></li>
+          <li><span class="terms-icon">$</span><span>Commission rates and tracking terms are displayed on your Dashboard.</span></li>
+          <li><span class="terms-icon">👁</span><span>Onsite placements are not guaranteed. <span class="store-name">this store</span> will exclusively decide which video content appears on their site.</span></li>
+          <li><span class="terms-icon">⏱</span><span>30-day removal window: After you remove a video from your Dashboard, <span class="store-name">this store</span> will remove it from their site within 30 days.</span></li>
+        </ul>
+      </div>
+
+      <div class="portal-card">
+      <h2>Create Your Account</h2>
+      <p>Start earning with Hypeach in minutes</p>
       <div class="tabs">
         <button class="tab active" id="tab-signup" onclick="oceShowTab('signup')">Sign Up</button>
         <button class="tab" id="tab-login" onclick="oceShowTab('login')">Log In</button>
@@ -430,19 +468,19 @@ export function renderPortalPage(pathPrefix) {
       <form id="signup-form" onsubmit="oceSignup(event)">
         <div class="form-group">
           <label for="s-name">Full Name</label>
-          <input type="text" id="s-name" required placeholder="Your full name">
+          <input type="text" id="s-name" required placeholder="Your name">
         </div>
         <div class="form-group">
-          <label for="s-email">Email Address</label>
+          <label for="s-email">Email</label>
           <input type="email" id="s-email" required placeholder="you@example.com">
         </div>
         <div class="form-group">
           <label for="s-pass">Password</label>
-          <input type="password" id="s-pass" required minlength="8" placeholder="Minimum 8 characters">
+          <input type="password" id="s-pass" required minlength="8" placeholder="Min. 8 characters">
         </div>
         <div class="checkbox" style="margin-bottom:16px">
           <input type="checkbox" id="s-terms" required>
-          <label for="s-terms">I agree to the Terms &amp; Conditions of the affiliate program</label>
+          <label for="s-terms">I agree to the Creator Terms and Conditions</label>
         </div>
         <div id="signup-err" class="form-error"></div>
         <button type="submit" class="btn-primary" id="signup-btn">Create Account</button>
@@ -460,6 +498,8 @@ export function renderPortalPage(pathPrefix) {
         <div id="login-err" class="form-error"></div>
         <button type="submit" class="btn-primary" id="login-btn">Log In</button>
       </form>
+      <p style="margin-top:14px;text-align:center">Already have an account? <button type="button" style="background:none;border:none;padding:0;color:#008060;cursor:pointer;font:inherit" onclick="oceShowTab('login')">Log in</button></p>
+      </div>
     </div>
   </div>
 
@@ -574,6 +614,16 @@ export function renderPortalPage(pathPrefix) {
     if(token) opts.headers['Authorization'] = 'Bearer ' + token;
     if(body) opts.body = JSON.stringify(body);
     return fetch(API + path, opts).then(function(r){ return r.json(); });
+  }
+
+  function setStoreName(){
+    var host = window.location.hostname || '';
+    var clean = host.replace(/^www\./, '');
+    if(clean.indexOf('.') > -1) clean = clean.split('.')[0];
+    if(clean) clean = clean.replace(/[-_]+/g, ' ').replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+    var name = clean || 'this store';
+    var els = document.querySelectorAll('.store-name');
+    for(var i=0;i<els.length;i++) els[i].textContent = name;
   }
 
   // ── Tabs ─────────────────────────────────────────────
@@ -784,6 +834,7 @@ export function renderPortalPage(pathPrefix) {
   };
 
   // ── Init ─────────────────────────────────────────────
+  setStoreName();
   var savedToken = localStorage.getItem('oce_creator_token');
   if(savedToken){
     token = savedToken;
