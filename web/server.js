@@ -479,7 +479,7 @@ async function authenticate(req, res, next) {
 }
 
 // ─── App Proxy Routes ─────────────────────────────────────────────
-// Shopify proxies {shop}/apps/oce/* → /proxy/*
+// Shopify proxies {shop}/apps/onsite-affiliate/* → /proxy/*
 
 app.post("/proxy/exposure", express.json(), async (req, res) => {
   const shopDomain = req.headers["x-shopify-shop-domain"];
