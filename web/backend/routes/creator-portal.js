@@ -16,6 +16,45 @@ import crypto from "crypto";
 
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.SHOPIFY_API_SECRET || "oce-dev-secret";
+const CREATOR_TERMS_URL = "https://onsiteaffiliate.com/#/creator-terms";
+
+async function sendVerificationEmail({ toEmail, code, shop }) {
+  const fromEmail = process.env.CREATOR_EMAIL_FROM || "Onsite Affiliate <no-reply@onsiteaffiliate.com>";
+  const subject = "Your Onsite Affiliate verification code";
+  const html = `
+    <div style="font-family:Arial,sans-serif;line-height:1.5;color:#1f2937">
+      <p>Use this code to verify your creator account for <strong>${shop}</strong>:</p>
+      <p style="font-size:28px;font-weight:700;letter-spacing:4px;margin:16px 0">${code}</p>
+      <p>This code expires in 15 minutes.</p>
+    </div>
+  `;
+
+  if (process.env.RESEND_API_KEY) {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [toEmail],
+        subject,
+        html,
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Resend email failed (${response.status}): ${body}`);
+    }
+    return;
+  }
+
+  // Development fallback when no email provider is configured.
+  console.warn("[Creator] RESEND_API_KEY is not configured; cannot deliver verification email.");
+  console.log("[Creator] Verification code for " + toEmail + ": " + code);
+}
 
 // ─── Password Utilities ──────────────────────────────────────────
 
@@ -115,7 +154,7 @@ export async function handleSignup(req, res) {
       },
     });
 
-    console.log("[Creator] Verification code for " + email + ": " + code);
+    await sendVerificationEmail({ toEmail: email, code, shop });
 
     res.json({
       ok: true,
@@ -123,7 +162,7 @@ export async function handleSignup(req, res) {
     });
   } catch (error) {
     console.error("[Creator] Signup error:", error);
-    res.status(500).json({ error: "Failed to create account" });
+    res.status(500).json({ error: "Failed to create account. Email delivery may be misconfigured." });
   }
 }
 
@@ -248,7 +287,7 @@ export async function handleResendCode(req, res) {
       },
     });
 
-    console.log("[Creator] Resend code for " + email + ": " + code);
+    await sendVerificationEmail({ toEmail: email, code, shop });
 
     res.json({
       ok: true,
@@ -256,7 +295,7 @@ export async function handleResendCode(req, res) {
     });
   } catch (error) {
     console.error("[Creator] Resend code error:", error);
-    res.status(500).json({ error: "Failed to resend code" });
+    res.status(500).json({ error: "Failed to resend code. Email delivery may be misconfigured." });
   }
 }
 
@@ -480,7 +519,7 @@ export function renderPortalPage(pathPrefix) {
         </div>
         <div class="checkbox" style="margin-bottom:16px">
           <input type="checkbox" id="s-terms" required>
-          <label for="s-terms">I agree to the Creator Terms and Conditions</label>
+          <label for="s-terms">I agree to the <a href="${CREATOR_TERMS_URL}" target="_blank" rel="noopener noreferrer">Creator Terms and Conditions</a></label>
         </div>
         <div id="signup-err" class="form-error"></div>
         <button type="submit" class="btn-primary" id="signup-btn">Create Account</button>
