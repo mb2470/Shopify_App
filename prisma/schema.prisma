@@ -75,3 +75,59 @@ model VideoAsset {
   @@unique([shop, assetId])
   @@index([shop])
 }
+
+// Creator accounts for the onsite affiliate portal
+model Creator {
+  id            String   @id @default(uuid())
+  shop          String
+  name          String
+  email         String
+  passwordHash  String
+  verified      Boolean  @default(false)
+  termsAccepted Boolean  @default(false)
+  oceCreatorId  String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  verificationCodes VerificationCode[]
+  videos            CreatorVideo[]
+
+  @@unique([shop, email])
+  @@index([shop])
+}
+
+// Email verification codes for creator signup
+model VerificationCode {
+  id        String   @id @default(uuid())
+  creatorId String
+  code      String
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId])
+}
+
+// Videos submitted by creators
+model CreatorVideo {
+  id         String   @id @default(uuid())
+  shop       String
+  creatorId  String
+  title      String
+  videoUrl   String
+  skus       String   // JSON array of SKUs
+  status     String   @default("pending") // pending | approved | rejected
+  oceAssetId String?
+  views      Int      @default(0)
+  orders     Int      @default(0)
+  commission Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([shop])
+  @@index([creatorId])
+}

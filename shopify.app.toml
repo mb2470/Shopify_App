@@ -25,5 +25,5 @@ api_version = "2024-10"
 
 [app_proxy]
 url = "https://shopify-app-q4bw.onrender.com/proxy"
-subpath = "oce"
+subpath = "onsite-affiliate"
 prefix = "apps"
