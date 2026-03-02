@@ -13,10 +13,43 @@
   ></script>
 {% endif %}
 
-<!-- Exposure event listener — always active when embed is enabled -->
+<!-- Exposure event listener + video auto-tracking -->
 <script>
   (function() {
     'use strict';
+
+    var PROXY_URL = '/apps/oce/exposure';
+    var tracked = {}; // asset_id → true, prevents duplicate exposures per session
+
+    // ── Session / storage helpers ──────────────────────────────────
+
+    function getSessionId() {
+      var key = '_oce_session_id';
+      var sessionId = null;
+      try { sessionId = localStorage.getItem(key); } catch(e) {}
+      if (!sessionId) {
+        sessionId = 'oce_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        try { localStorage.setItem(key, sessionId); } catch(e) {}
+      }
+      return sessionId;
+    }
+
+    function updateCartAttributes(exposureIds) {
+      fetch('/cart/update.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attributes: {
+            '_oce_exposure_ids': JSON.stringify(exposureIds),
+            '_oce_session_id': getSessionId()
+          }
+        })
+      }).catch(function(err) {
+        console.warn('[OCE] Failed to update cart attributes:', err);
+      });
+    }
+
+    // ── Exposure event listener (stores in session + cart) ─────────
 
     window.addEventListener('oce:exposure', function(event) {
       var exposureId = event.detail && event.detail.exposure_id;
@@ -39,33 +72,101 @@
       updateCartAttributes(stored);
     });
 
-    function updateCartAttributes(exposureIds) {
-      fetch('/cart/update.js', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          attributes: {
-            '_oce_exposure_ids': JSON.stringify(exposureIds),
-            '_oce_session_id': getSessionId()
+    // ── Video auto-tracking ────────────────────────────────────────
+
+    function getAssetId(video) {
+      // 1. Explicit OCE attribute
+      var oceId = video.getAttribute('data-oce-asset-id');
+      if (oceId) return oceId;
+
+      // 2. Shopify media ID (rendered by video_tag)
+      var mediaId = video.getAttribute('data-media-id');
+      if (mediaId) return 'shopify-video-' + mediaId;
+
+      // 3. Derive from src URL
+      var src = video.src || (video.querySelector('source') && video.querySelector('source').src) || '';
+      if (src) {
+        // Use the filename without query params as a stable identifier
+        var path = src.split('?')[0].split('/').pop();
+        return 'video-' + path;
+      }
+
+      return null;
+    }
+
+    function trackVideo(video) {
+      if (video._oceTracked) return;
+      video._oceTracked = true;
+
+      video.addEventListener('play', function onPlay() {
+        var assetId = getAssetId(video);
+        if (!assetId || tracked[assetId]) return;
+        tracked[assetId] = true;
+
+        var sku = video.getAttribute('data-oce-sku') || '';
+
+        // Create server-side exposure via app proxy
+        fetch(PROXY_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset_id: assetId,
+            session_id: getSessionId(),
+            sku: sku || undefined
+          })
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.exposure_id) {
+            window.dispatchEvent(new CustomEvent('oce:exposure', {
+              detail: {
+                exposure_id: data.exposure_id,
+                asset_id: assetId,
+                sku: sku
+              }
+            }));
           }
         })
-      }).catch(function(err) {
-        console.warn('[OCE] Failed to update cart attributes:', err);
+        .catch(function(err) {
+          console.warn('[OCE] Exposure creation failed:', err);
+        });
       });
     }
 
-    function getSessionId() {
-      var key = '_oce_session_id';
-      var sessionId = null;
-      try { sessionId = localStorage.getItem(key); } catch(e) {}
-      if (!sessionId) {
-        sessionId = 'oce_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        try { localStorage.setItem(key, sessionId); } catch(e) {}
+    // Track videos already in the DOM
+    function scanForVideos() {
+      var videos = document.querySelectorAll('video');
+      for (var i = 0; i < videos.length; i++) {
+        trackVideo(videos[i]);
       }
-      return sessionId;
     }
 
+    // Watch for dynamically inserted videos (Shopify deferred-media pattern)
+    var observer = new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var nodes = mutations[i].addedNodes;
+        for (var j = 0; j < nodes.length; j++) {
+          var node = nodes[j];
+          if (node.nodeType !== 1) continue;
+          if (node.tagName === 'VIDEO') {
+            trackVideo(node);
+          } else if (node.querySelectorAll) {
+            var nested = node.querySelectorAll('video');
+            for (var k = 0; k < nested.length; k++) {
+              trackVideo(nested[k]);
+            }
+          }
+        }
+      }
+    });
+
+    // ── Init ───────────────────────────────────────────────────────
+
     document.addEventListener('DOMContentLoaded', function() {
+      scanForVideos();
+      observer.observe(document.body, { childList: true, subtree: true });
+
+      // Re-sync any exposures from a previous page in this session
       try {
         var raw = sessionStorage.getItem('_oce_exposure_ids');
         if (raw) {

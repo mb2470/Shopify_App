@@ -374,6 +374,34 @@ async function authenticate(req, res, next) {
   }
 }
 
+// ─── App Proxy Routes ─────────────────────────────────────────────
+// Shopify proxies {shop}/apps/oce/* → /proxy/*
+
+app.post("/proxy/exposure", express.json(), async (req, res) => {
+  const shopDomain = req.headers["x-shopify-shop-domain"];
+  if (!shopDomain) return res.status(400).json({ error: "Missing shop domain" });
+
+  const settings = await prisma.oceSettings.findUnique({ where: { shop: shopDomain } });
+  if (!settings?.apiKey) return res.status(500).json({ error: "OCE not configured" });
+
+  const { asset_id, session_id, sku, creator_external_id } = req.body;
+  if (!asset_id || !session_id) return res.status(400).json({ error: "asset_id and session_id required" });
+
+  try {
+    const oceApi = new OceApiService(settings.apiKey);
+    const result = await oceApi.createExposure({
+      assetId: asset_id,
+      sessionId: session_id,
+      sku: sku || undefined,
+      creatorExternalId: creator_external_id || undefined,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] Proxy exposure error:", err.message);
+    res.status(500).json({ error: "Failed to create exposure" });
+  }
+});
+
 // ─── API Routes ───────────────────────────────────────────────────
 
 app.get("/api/settings", authenticate, async (req, res) => {
