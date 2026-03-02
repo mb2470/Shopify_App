@@ -59,15 +59,34 @@ export async function handleOrderCreated(shop, orderData) {
   );
   const sessionId = sessionAttr?.value || undefined;
 
+  // Skip unattributed orders to avoid noisy 400s from OCE validation
+  if (!exposureIds.length && !sessionId) {
+    await prisma.orderSync.update({
+      where: { id: syncRecord.id },
+      data: {
+        status: "skipped",
+        exposureIds: JSON.stringify([]),
+        errorMessage: "No OCE exposure/session identifiers on order",
+      },
+    });
+
+    console.log(`[OCE] Skipping order ${shopifyOrderId} — no exposure IDs/session ID`);
+    return { status: "skipped", reason: "missing_attribution_identifiers" };
+  }
+
   // 6. Build line items (OCE API expects qty, price, revenue)
-  const lineItems = (orderData.line_items || []).map((item) => ({
-    sku: item.sku || "",
-    productId: String(item.product_id),
-    variantId: String(item.variant_id),
-    quantity: item.quantity,
-    price: parseFloat(item.price),
-    revenue: parseFloat(item.price) * item.quantity,
-  }));
+  const lineItems = (orderData.line_items || []).map((item) => {
+    const quantity = Number(item.quantity || 0);
+    const price = Number.parseFloat(item.price || "0");
+    return {
+      sku: item.sku || undefined,
+      productId: item.product_id ? String(item.product_id) : undefined,
+      variantId: item.variant_id ? String(item.variant_id) : undefined,
+      quantity,
+      price,
+      revenue: Number((price * quantity).toFixed(2)),
+    };
+  });
 
   // 7. Send to OCE API
   const oceApi = new OceApiService(settings.apiKey);
@@ -96,17 +115,21 @@ export async function handleOrderCreated(shop, orderData) {
     console.log(`[OCE] Order ${shopifyOrderId} sent successfully`);
     return { status: "sent", oceOrderId: result?.order_id };
   } catch (error) {
+    const detailedError = error?.responseBody
+      ? `${error.message} | response: ${error.responseBody}`
+      : error.message;
+
     // 9. Update sync record with failure
     await prisma.orderSync.update({
       where: { id: syncRecord.id },
       data: {
         status: "failed",
-        errorMessage: error.message,
+        errorMessage: detailedError,
       },
     });
 
-    console.error(`[OCE] Failed to send order ${shopifyOrderId}:`, error.message);
-    return { status: "failed", error: error.message };
+    console.error(`[OCE] Failed to send order ${shopifyOrderId}:`, detailedError);
+    return { status: "failed", error: detailedError };
   }
 }
 
