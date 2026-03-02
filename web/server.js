@@ -241,11 +241,35 @@ async function registerWebhooks(shop, accessToken) {
     { topic: "app/uninstalled", address: `${SHOPIFY_APP_URL}/webhooks/app/uninstalled` },
   ];
 
+  let existingWebhooks = [];
+  try {
+    const existingResp = await fetch(`https://${shop}/admin/api/2024-10/webhooks.json`, {
+      headers: { "X-Shopify-Access-Token": accessToken },
+    });
+    const existingData = await existingResp.json();
+    existingWebhooks = existingData.webhooks || [];
+  } catch (error) {
+    console.warn("[Webhook] Could not load existing webhooks before registration:", error.message);
+  }
+
   const results = [];
   for (const wh of webhooks) {
+    const existing = existingWebhooks.find((w) => w.topic === wh.topic);
+
+    if (existing?.address === wh.address) {
+      console.log(`[Webhook] ${wh.topic} already registered for ${shop} (id: ${existing.id})`);
+      results.push({ topic: wh.topic, status: "already_registered", id: existing.id });
+      continue;
+    }
+
     try {
-      const resp = await fetch(`https://${shop}/admin/api/2024-10/webhooks.json`, {
-        method: "POST",
+      const isUpdate = !!existing;
+      const endpoint = isUpdate
+        ? `https://${shop}/admin/api/2024-10/webhooks/${existing.id}.json`
+        : `https://${shop}/admin/api/2024-10/webhooks.json`;
+
+      const resp = await fetch(endpoint, {
+        method: isUpdate ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Shopify-Access-Token": accessToken,
@@ -254,8 +278,9 @@ async function registerWebhooks(shop, accessToken) {
       });
       const data = await resp.json();
       if (data.webhook) {
-        console.log(`[Webhook] Registered ${wh.topic} for ${shop} (id: ${data.webhook.id})`);
-        results.push({ topic: wh.topic, status: "registered", id: data.webhook.id });
+        const status = isUpdate ? "updated" : "registered";
+        console.log(`[Webhook] ${status} ${wh.topic} for ${shop} (id: ${data.webhook.id})`);
+        results.push({ topic: wh.topic, status, id: data.webhook.id });
       } else {
         const errMsg = JSON.stringify(data.errors || data);
         console.error(`[Webhook] Failed ${wh.topic} for ${shop}: ${errMsg}`);
