@@ -645,7 +645,7 @@ export default function OceDashboard() {
                     <Text variant="bodySm" as="p" fontFamily="mono">
                       {'<script'}
                       <br />
-                      {'  src="https://app.onsiteaffiliate.com/sdk/oce.min.js?v=1.1.0"'}
+                      {'  src="https://app.onsiteaffiliate.com/sdk/oce.min.js?v=1.1.3"'}
                       <br />
                       {`  data-api-key="${settings.hasApiKey ? settings.apiKey : 'YOUR_API_KEY'}"`}
                       <br />
