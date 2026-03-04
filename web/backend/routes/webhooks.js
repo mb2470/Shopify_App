@@ -70,7 +70,9 @@ export async function handleOrderCreated(shop, orderData) {
       },
     });
 
-    console.log(`[OCE] Skipping order ${shopifyOrderId} — no exposure IDs/session ID`);
+    // Debug: log what Shopify sent so you can verify cart attributes → note_attributes
+    const noteAttrs = (orderData.note_attributes || []).map((a) => ({ name: a.name, value: a.value }));
+    console.log(`[OCE] Skipping order ${shopifyOrderId} — no exposure IDs/session ID. note_attributes sample:`, JSON.stringify(noteAttrs.slice(0, 20)));
     return { status: "skipped", reason: "missing_attribution_identifiers" };
   }
 

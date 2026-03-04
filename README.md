@@ -53,9 +53,11 @@ A Shopify embedded app that integrates with the [Onsite Commission Engine (OCE)]
 
 ### 2. Order Webhook → OCE API
 - Listens for `orders/create` webhooks from Shopify
-- Extracts exposure IDs from cart/note attributes
-- Sends order data + exposure IDs to OCE REST API
+- Extracts **exposure IDs** (OCE’s “engagement” identifiers) from cart/note attributes (`_oce_exposure_ids`, `_oce_session_id`)
+- Sends order data + `exposure_ids` (and optional `session_id`) to OCE REST API
 - Logs all syncs with status tracking and error handling
+
+**Important:** In OCE/Onsite Affiliate, the ID that links a video engagement to an order is the **exposure_id** (returned from the exposure creation endpoint). The app stores these in cart attributes so the order webhook can send them as `exposure_ids`; the backend expects exactly that field name.
 
 ### 3. Admin Dashboard
 - **API Key Management**: Merchants enter and validate their OCE API key

@@ -265,6 +265,18 @@
       }
     });
 
+    // ── Sync sessionStorage → cart (so order gets exposure_ids) ─────
+    // Run on init, cart page, before unload, and when tab becomes visible
+    // so exposure IDs are on the cart before checkout even if user navigates quickly.
+    function syncStoredExposuresToCart() {
+      try {
+        var raw = sessionStorage.getItem('_oce_exposure_ids');
+        if (!raw) return;
+        var stored = JSON.parse(raw);
+        if (stored.length > 0) updateCartAttributes(stored);
+      } catch(e) {}
+    }
+
     // ── Init ───────────────────────────────────────────────────────
 
     document.addEventListener('DOMContentLoaded', function() {
@@ -272,13 +284,22 @@
       observer.observe(document.body, { childList: true, subtree: true });
 
       // Re-sync any exposures from a previous page in this session
-      try {
-        var raw = sessionStorage.getItem('_oce_exposure_ids');
-        if (raw) {
-          var stored = JSON.parse(raw);
-          if (stored.length > 0) updateCartAttributes(stored);
-        }
-      } catch(e) {}
+      syncStoredExposuresToCart();
+
+      // If we're on the cart page, sync again so cart has latest before checkout
+      if (typeof window.location !== 'undefined' && /\/cart(\?|$)/.test(window.location.pathname || '')) {
+        syncStoredExposuresToCart();
+      }
+    });
+
+    // Before user leaves (e.g. clicks Checkout), push any pending exposures to cart
+    window.addEventListener('beforeunload', function() {
+      syncStoredExposuresToCart();
+    });
+
+    // When tab becomes visible (e.g. returning to tab before checkout), re-sync
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'visible') syncStoredExposuresToCart();
     });
   })();
 </script>
