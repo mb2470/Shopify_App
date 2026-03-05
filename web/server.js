@@ -913,19 +913,9 @@ app.get("/api/portal-content", authenticate, async (req, res) => {
 app.put("/api/portal-content", authenticate, async (req, res) => {
   try {
     const result = await savePortalContent(req.shop, req.body);
-    res.json(result);
+    res.json({ ok: true, content: result.content });
   } catch (err) {
     console.error("[OCE] PUT /api/portal-content error:", err);
-    res.status(500).json({ ok: false, error: err.message });
-  }
-});
-
-app.post("/api/portal-preview", authenticate, async (req, res) => {
-  try {
-    const html = renderPortalPage("/apps/onsite-affiliate", req.body);
-    res.json({ ok: true, html });
-  } catch (err) {
-    console.error("[OCE] POST /api/portal-preview error:", err);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
@@ -972,6 +962,12 @@ function getAdminHTML(shop, host) {
     .form-g{margin-bottom:16px}
     .form-g label{display:block;font-size:14px;font-weight:500;margin-bottom:4px}
     .form-g .help{font-size:12px;color:#6d7175;margin-top:2px}
+    .rt-toolbar{display:flex;gap:2px;border:1px solid #c9cccf;border-bottom:none;border-radius:8px 8px 0 0;padding:4px 6px;background:#f6f6f7}
+    .rt-toolbar button{background:none;border:1px solid transparent;border-radius:4px;padding:2px 8px;font-size:13px;cursor:pointer;color:#202223}
+    .rt-toolbar button:hover{background:#e1e3e5}
+    .rt-editor{min-height:48px;padding:8px 12px;border:1px solid #c9cccf;border-radius:0 0 8px 8px;font-size:14px;line-height:1.5;outline:none;font-family:inherit}
+    .rt-editor:focus{border-color:#005bd3;box-shadow:0 0 0 1px #005bd3}
+    .rt-editor a{color:#005bd3;text-decoration:underline}
     input[type=text],input[type=password],input[type=number],select{width:100%;padding:8px 12px;border:1px solid #c9cccf;border-radius:8px;font-size:14px;outline:none}
     input:focus,select:focus{border-color:#005bd3;box-shadow:0 0 0 1px #005bd3}
     .btn{display:inline-block;padding:8px 16px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;border:none}
@@ -1159,12 +1155,18 @@ function getAdminHTML(shop, host) {
           <div class="form-g"><label>Page Title</label><input type="text" id="pc-pageTitle"><p class="help">Use {store} for the store name</p></div>
           <div class="form-g"><label>Signup Card Title</label><input type="text" id="pc-signupCardTitle"></div>
         </div>
-        <div class="form-g"><label>Page Subtitle</label><textarea id="pc-pageSubtitle" rows="2" style="width:100%;padding:8px 12px;border:1px solid #c9cccf;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical"></textarea></div>
-        <div class="form-g"><label>Page Subtitle (line 2)</label><textarea id="pc-pageSubtitle2" rows="2" style="width:100%;padding:8px 12px;border:1px solid #c9cccf;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical"></textarea></div>
+        <div class="form-g"><label>Page Subtitle</label>
+          <div class="rt-toolbar"><button type="button" onclick="rtCmd('bold')" title="Bold"><b>B</b></button><button type="button" onclick="rtCmd('italic')" title="Italic"><i>I</i></button><button type="button" onclick="rtLink()" title="Insert Link">Link</button></div>
+          <div class="rt-editor" contenteditable="true" id="pc-pageSubtitle"></div>
+        </div>
+        <div class="form-g"><label>Page Subtitle (line 2)</label>
+          <div class="rt-toolbar"><button type="button" onclick="rtCmd('bold')" title="Bold"><b>B</b></button><button type="button" onclick="rtCmd('italic')" title="Italic"><i>I</i></button><button type="button" onclick="rtLink()" title="Insert Link">Link</button></div>
+          <div class="rt-editor" contenteditable="true" id="pc-pageSubtitle2"></div>
+        </div>
         <div class="form-g"><label>Signup Card Subtitle</label><input type="text" id="pc-signupCardSubtitle"></div>
         <hr>
-        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Benefit Cards</h3>
-        <div class="grid-2">
+        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Benefit Cards <label style="font-weight:400;font-size:13px;margin-left:12px"><input type="checkbox" id="pc-showBenefits" checked onchange="togglePortalSection('benefits',this.checked)"> Visible on portal</label></h3>
+        <div id="pc-benefits-fields" class="grid-2">
           <div class="form-g"><label>Benefit 1 Title</label><input type="text" id="pc-benefit1Title"></div>
           <div class="form-g"><label>Benefit 1 Description</label><input type="text" id="pc-benefit1Desc"></div>
           <div class="form-g"><label>Benefit 2 Title</label><input type="text" id="pc-benefit2Title"></div>
@@ -1173,17 +1175,19 @@ function getAdminHTML(shop, host) {
           <div class="form-g"><label>Benefit 3 Description</label><input type="text" id="pc-benefit3Desc"></div>
         </div>
         <hr>
-        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Key Terms</h3>
-        <div class="form-g"><label>Terms Section Heading</label><input type="text" id="pc-termsHeading"></div>
-        <div class="grid-2">
-          <div class="form-g"><label>Term 1 Icon</label><input type="text" id="pc-term1Icon" style="width:60px"></div>
-          <div class="form-g"><label>Term 1 Text</label><input type="text" id="pc-term1Text"><p class="help">Use {store} for the store name</p></div>
-          <div class="form-g"><label>Term 2 Icon</label><input type="text" id="pc-term2Icon" style="width:60px"></div>
-          <div class="form-g"><label>Term 2 Text</label><input type="text" id="pc-term2Text"></div>
-          <div class="form-g"><label>Term 3 Icon</label><input type="text" id="pc-term3Icon" style="width:60px"></div>
-          <div class="form-g"><label>Term 3 Text</label><input type="text" id="pc-term3Text"><p class="help">Use {store} for the store name</p></div>
-          <div class="form-g"><label>Term 4 Icon</label><input type="text" id="pc-term4Icon" style="width:60px"></div>
-          <div class="form-g"><label>Term 4 Text</label><input type="text" id="pc-term4Text"><p class="help">Use {store} for the store name</p></div>
+        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Key Terms <label style="font-weight:400;font-size:13px;margin-left:12px"><input type="checkbox" id="pc-showTerms" checked onchange="togglePortalSection('terms',this.checked)"> Visible on portal</label></h3>
+        <div id="pc-terms-fields">
+          <div class="form-g"><label>Terms Section Heading</label><input type="text" id="pc-termsHeading"></div>
+          <div class="grid-2">
+            <div class="form-g"><label>Term 1 Icon</label><input type="text" id="pc-term1Icon" style="width:60px"></div>
+            <div class="form-g"><label>Term 1 Text</label><input type="text" id="pc-term1Text"><p class="help">Use {store} for the store name</p></div>
+            <div class="form-g"><label>Term 2 Icon</label><input type="text" id="pc-term2Icon" style="width:60px"></div>
+            <div class="form-g"><label>Term 2 Text</label><input type="text" id="pc-term2Text"></div>
+            <div class="form-g"><label>Term 3 Icon</label><input type="text" id="pc-term3Icon" style="width:60px"></div>
+            <div class="form-g"><label>Term 3 Text</label><input type="text" id="pc-term3Text"><p class="help">Use {store} for the store name</p></div>
+            <div class="form-g"><label>Term 4 Icon</label><input type="text" id="pc-term4Icon" style="width:60px"></div>
+            <div class="form-g"><label>Term 4 Text</label><input type="text" id="pc-term4Text"><p class="help">Use {store} for the store name</p></div>
+          </div>
         </div>
         <hr>
         <h3 style="font-size:14px;font-weight:600;margin:12px 0">Dashboard Labels</h3>
@@ -1193,21 +1197,17 @@ function getAdminHTML(shop, host) {
           <div class="form-g"><label>Your Videos Title</label><input type="text" id="pc-yourVideosTitle"></div>
         </div>
         <hr>
+        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Custom CSS</h3>
+        <div class="form-g"><label>Additional styles applied to the creator portal</label>
+          <textarea id="pc-customCSS" rows="4" style="width:100%;padding:8px 12px;border:1px solid #c9cccf;border-radius:8px;font-size:13px;font-family:'SF Mono',Monaco,Consolas,monospace;resize:vertical;background:#fafafa" placeholder="#oce-portal .benefit-card { background: #f0f8ff; }"></textarea>
+          <p class="help">Scope styles under #oce-portal to avoid conflicts with the storefront theme</p>
+        </div>
+        <hr>
         <div style="display:flex;gap:8px;margin-top:12px">
           <button class="btn btn-p" id="portal-save-btn" onclick="savePortalContent()">Save Portal Content</button>
-          <button class="btn btn-s" id="portal-preview-btn" onclick="previewPortal()">Preview Portal</button>
+          <button class="btn btn-s" id="portal-preview-btn" onclick="previewPortal()">Preview on Store</button>
         </div>
       </div>
-    </div>
-  </div>
-
-  <div id="portal-preview-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center">
-    <div style="background:#fff;border-radius:12px;width:90%;max-width:900px;height:80vh;display:flex;flex-direction:column;overflow:hidden">
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e1e3e5">
-        <h3 style="font-size:16px;font-weight:600">Creator Portal Preview</h3>
-        <button class="btn btn-link" onclick="closePortalPreview()" style="font-size:18px">&times; Close</button>
-      </div>
-      <iframe id="portal-preview-iframe" style="flex:1;border:none;width:100%" sandbox="allow-scripts"></iframe>
     </div>
   </div>
 
@@ -1612,7 +1612,25 @@ function togglePortal(){
   if(portalOpen&&!portalLoaded){loadPortalContent()}
 }
 
-const portalFields=["pageTitle","signupCardTitle","pageSubtitle","pageSubtitle2","signupCardSubtitle","benefit1Title","benefit1Desc","benefit2Title","benefit2Desc","benefit3Title","benefit3Desc","termsHeading","term1Icon","term1Text","term2Icon","term2Text","term3Icon","term3Text","term4Icon","term4Text","dashboardTitle","submitVideoTitle","yourVideosTitle"];
+// Fields stored as plain text (input.value)
+const portalInputFields=["pageTitle","signupCardTitle","signupCardSubtitle","benefit1Title","benefit1Desc","benefit2Title","benefit2Desc","benefit3Title","benefit3Desc","termsHeading","term1Icon","term1Text","term2Icon","term2Text","term3Icon","term3Text","term4Icon","term4Text","dashboardTitle","submitVideoTitle","yourVideosTitle","customCSS"];
+// Fields stored as rich text (innerHTML)
+const portalRichFields=["pageSubtitle","pageSubtitle2"];
+// Boolean toggle fields
+const portalBoolFields=["showBenefits","showTerms"];
+
+function togglePortalSection(section,visible){
+  var map={benefits:"pc-benefits-fields",terms:"pc-terms-fields"};
+  var el=document.getElementById(map[section]);
+  if(el)el.style.opacity=visible?"1":"0.4";
+}
+
+// Rich text commands
+function rtCmd(cmd){document.execCommand(cmd,false,null)}
+function rtLink(){
+  var url=prompt("Enter URL:");
+  if(url)document.execCommand("createLink",false,url);
+}
 
 async function loadPortalContent(){
   document.getElementById("portal-loading").style.display="block";
@@ -1622,9 +1640,23 @@ async function loadPortalContent(){
   try{
     var r=await api("GET","/api/portal-content");
     if(r.ok&&r.content){
-      portalFields.forEach(function(f){
+      portalInputFields.forEach(function(f){
         var el=document.getElementById("pc-"+f);
         if(el)el.value=r.content[f]||"";
+      });
+      portalRichFields.forEach(function(f){
+        var el=document.getElementById("pc-"+f);
+        if(el)el.innerHTML=r.content[f]||"";
+      });
+      portalBoolFields.forEach(function(f){
+        var el=document.getElementById("pc-"+f);
+        if(el){
+          var val=r.content[f]!==false;
+          el.checked=val;
+          // Trigger visual state
+          if(f==="showBenefits")togglePortalSection("benefits",val);
+          if(f==="showTerms")togglePortalSection("terms",val);
+        }
       });
       portalLoaded=true;
     }else{
@@ -1641,9 +1673,17 @@ async function loadPortalContent(){
 
 function gatherPortalFields(){
   var data={};
-  portalFields.forEach(function(f){
+  portalInputFields.forEach(function(f){
     var el=document.getElementById("pc-"+f);
     if(el)data[f]=el.value;
+  });
+  portalRichFields.forEach(function(f){
+    var el=document.getElementById("pc-"+f);
+    if(el)data[f]=el.innerHTML;
+  });
+  portalBoolFields.forEach(function(f){
+    var el=document.getElementById("pc-"+f);
+    if(el)data[f]=el.checked;
   });
   return data;
 }
@@ -1672,29 +1712,24 @@ async function savePortalContent(){
 
 async function previewPortal(){
   var btn=document.getElementById("portal-preview-btn");
-  btn.disabled=true;btn.textContent="Loading preview...";
+  btn.disabled=true;btn.textContent="Saving & opening...";
+  document.getElementById("portal-error").style.display="none";
   try{
+    // Save first so the live page reflects latest edits
     var data=gatherPortalFields();
-    var r=await api("POST","/api/portal-preview",data);
-    if(r.ok&&r.html){
-      var modal=document.getElementById("portal-preview-modal");
-      modal.style.display="flex";
-      var iframe=document.getElementById("portal-preview-iframe");
-      iframe.srcdoc=r.html;
-    }else{
-      document.getElementById("portal-error").textContent=r.error||"Preview failed";
-      document.getElementById("portal-error").style.display="block";
+    var r=await api("PUT","/api/portal-content",data);
+    if(r.ok){
+      document.getElementById("portal-saved").style.display="block";
+      setTimeout(function(){document.getElementById("portal-saved").style.display="none"},5000);
     }
+    // Open the live storefront portal in a new tab
+    var storeUrl="https://"+S+"/apps/onsite-affiliate";
+    window.open(storeUrl,"_blank");
   }catch(e){
     document.getElementById("portal-error").textContent="Error: "+e.message;
     document.getElementById("portal-error").style.display="block";
   }
-  btn.disabled=false;btn.textContent="Preview Portal";
-}
-
-function closePortalPreview(){
-  document.getElementById("portal-preview-modal").style.display="none";
-  document.getElementById("portal-preview-iframe").srcdoc="";
+  btn.disabled=false;btn.textContent="Preview on Store";
 }
 
 // Wait for App Bridge iframe handshake before first API call

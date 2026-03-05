@@ -520,6 +520,9 @@ export const DEFAULT_PORTAL_CONTENT = {
   dashboardTitle: "Creator Dashboard",
   submitVideoTitle: "Submit a Video",
   yourVideosTitle: "Your Videos",
+  showBenefits: true,
+  showTerms: true,
+  customCSS: "",
 };
 
 /**
