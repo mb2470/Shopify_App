@@ -27,6 +27,8 @@ import {
   registerAssets,
   getRegisteredAssets,
   getDiscoveredVideos,
+  getPortalContent,
+  savePortalContent,
 } from "./backend/routes/settings.js";
 import {
   handleSignup,
@@ -898,6 +900,36 @@ app.post("/api/assets/register", authenticate, async (req, res) => {
   }
 });
 
+app.get("/api/portal-content", authenticate, async (req, res) => {
+  try {
+    const content = await getPortalContent(req.shop);
+    res.json({ ok: true, content });
+  } catch (err) {
+    console.error("[OCE] GET /api/portal-content error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.put("/api/portal-content", authenticate, async (req, res) => {
+  try {
+    const result = await savePortalContent(req.shop, req.body);
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] PUT /api/portal-content error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/api/portal-preview", authenticate, async (req, res) => {
+  try {
+    const html = renderPortalPage("/apps/onsite-affiliate", req.body);
+    res.json({ ok: true, html });
+  } catch (err) {
+    console.error("[OCE] POST /api/portal-preview error:", err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Admin UI ─────────────────────────────────────────────────────
 
 app.get("/", (req, res) => {
@@ -1024,28 +1056,6 @@ function getAdminHTML(shop, host) {
     </div>
   </div>
 
-  <div class="card"><div class="card-row"><h2>Statistics</h2><button class="btn btn-link" id="stats-toggle" onclick="toggleStats()">Expand ▾</button></div>
-    <div id="stats-panel" style="display:none"><hr>
-      <div style="display:flex;gap:8px;margin-bottom:16px">
-        <button class="btn btn-s" id="sp7" onclick="loadStats(7)">7 days</button>
-        <button class="btn btn-p" id="sp30" onclick="loadStats(30)">30 days</button>
-        <button class="btn btn-s" id="sp90" onclick="loadStats(90)">90 days</button>
-      </div>
-      <div id="stats-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Loading statistics...</div>
-      <div id="stats-content" style="display:none">
-        <div class="grid-3">
-          <div class="status-box"><h3>Total Exposures</h3><p id="stat-exp" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
-          <div class="status-box"><h3>Total Orders</h3><p id="stat-ord" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
-          <div class="status-box"><h3>Total Revenue</h3><p id="stat-rev" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
-          <div class="status-box"><h3>Total Commission</h3><p id="stat-com" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
-          <div class="status-box"><h3>Active Creators</h3><p id="stat-cre" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
-          <div class="status-box"><h3>Active Assets</h3><p id="stat-ast" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
-        </div>
-      </div>
-      <div id="stats-error" style="display:none;color:#6e1717;padding:12px;background:#fff4f4;border-radius:8px"></div>
-    </div>
-  </div>
-
   <div class="card">
     <div class="card-row"><h2>Video Asset Registration</h2>
       <button class="btn btn-link" id="assets-toggle" onclick="toggleAssets()">Expand &#9662;</button>
@@ -1110,6 +1120,94 @@ function getAdminHTML(shop, host) {
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="card"><div class="card-row"><h2>Statistics</h2><button class="btn btn-link" id="stats-toggle" onclick="toggleStats()">Expand ▾</button></div>
+    <div id="stats-panel" style="display:none"><hr>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <button class="btn btn-s" id="sp7" onclick="loadStats(7)">7 days</button>
+        <button class="btn btn-p" id="sp30" onclick="loadStats(30)">30 days</button>
+        <button class="btn btn-s" id="sp90" onclick="loadStats(90)">90 days</button>
+      </div>
+      <div id="stats-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Loading statistics...</div>
+      <div id="stats-content" style="display:none">
+        <div class="grid-3">
+          <div class="status-box"><h3>Total Exposures</h3><p id="stat-exp" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Total Orders</h3><p id="stat-ord" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Total Revenue</h3><p id="stat-rev" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Total Commission</h3><p id="stat-com" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Active Creators</h3><p id="stat-cre" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+          <div class="status-box"><h3>Active Assets</h3><p id="stat-ast" style="font-size:24px;font-weight:600;margin-top:4px">—</p></div>
+        </div>
+      </div>
+      <div id="stats-error" style="display:none;color:#6e1717;padding:12px;background:#fff4f4;border-radius:8px"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-row"><div><h2>Creator Portal</h2><p style="font-size:13px;color:#6d7175">Edit the copy displayed on your creator signup portal</p></div>
+      <button class="btn btn-link" id="portal-toggle" onclick="togglePortal()">Expand &#9662;</button>
+    </div>
+    <div id="portal-panel" style="display:none"><hr>
+      <div id="portal-saved" style="display:none;color:#0b5e3b;padding:12px;background:#f1f8f5;border:1px solid #aee9d1;border-radius:8px;margin-bottom:12px">Portal content saved successfully.</div>
+      <div id="portal-error" style="display:none;color:#6e1717;padding:12px;background:#fff4f4;border-radius:8px;margin-bottom:12px"></div>
+      <div id="portal-loading" style="display:none;text-align:center;padding:20px;color:#6d7175">Loading portal content...</div>
+      <div id="portal-content">
+        <h3 style="font-size:14px;font-weight:600;margin-bottom:12px">Page Header</h3>
+        <div class="grid-2">
+          <div class="form-g"><label>Page Title</label><input type="text" id="pc-pageTitle"><p class="help">Use {store} for the store name</p></div>
+          <div class="form-g"><label>Signup Card Title</label><input type="text" id="pc-signupCardTitle"></div>
+        </div>
+        <div class="form-g"><label>Page Subtitle</label><textarea id="pc-pageSubtitle" rows="2" style="width:100%;padding:8px 12px;border:1px solid #c9cccf;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical"></textarea></div>
+        <div class="form-g"><label>Page Subtitle (line 2)</label><textarea id="pc-pageSubtitle2" rows="2" style="width:100%;padding:8px 12px;border:1px solid #c9cccf;border-radius:8px;font-size:14px;font-family:inherit;resize:vertical"></textarea></div>
+        <div class="form-g"><label>Signup Card Subtitle</label><input type="text" id="pc-signupCardSubtitle"></div>
+        <hr>
+        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Benefit Cards</h3>
+        <div class="grid-2">
+          <div class="form-g"><label>Benefit 1 Title</label><input type="text" id="pc-benefit1Title"></div>
+          <div class="form-g"><label>Benefit 1 Description</label><input type="text" id="pc-benefit1Desc"></div>
+          <div class="form-g"><label>Benefit 2 Title</label><input type="text" id="pc-benefit2Title"></div>
+          <div class="form-g"><label>Benefit 2 Description</label><input type="text" id="pc-benefit2Desc"></div>
+          <div class="form-g"><label>Benefit 3 Title</label><input type="text" id="pc-benefit3Title"></div>
+          <div class="form-g"><label>Benefit 3 Description</label><input type="text" id="pc-benefit3Desc"></div>
+        </div>
+        <hr>
+        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Key Terms</h3>
+        <div class="form-g"><label>Terms Section Heading</label><input type="text" id="pc-termsHeading"></div>
+        <div class="grid-2">
+          <div class="form-g"><label>Term 1 Icon</label><input type="text" id="pc-term1Icon" style="width:60px"></div>
+          <div class="form-g"><label>Term 1 Text</label><input type="text" id="pc-term1Text"><p class="help">Use {store} for the store name</p></div>
+          <div class="form-g"><label>Term 2 Icon</label><input type="text" id="pc-term2Icon" style="width:60px"></div>
+          <div class="form-g"><label>Term 2 Text</label><input type="text" id="pc-term2Text"></div>
+          <div class="form-g"><label>Term 3 Icon</label><input type="text" id="pc-term3Icon" style="width:60px"></div>
+          <div class="form-g"><label>Term 3 Text</label><input type="text" id="pc-term3Text"><p class="help">Use {store} for the store name</p></div>
+          <div class="form-g"><label>Term 4 Icon</label><input type="text" id="pc-term4Icon" style="width:60px"></div>
+          <div class="form-g"><label>Term 4 Text</label><input type="text" id="pc-term4Text"><p class="help">Use {store} for the store name</p></div>
+        </div>
+        <hr>
+        <h3 style="font-size:14px;font-weight:600;margin:12px 0">Dashboard Labels</h3>
+        <div class="grid-3">
+          <div class="form-g"><label>Dashboard Title</label><input type="text" id="pc-dashboardTitle"></div>
+          <div class="form-g"><label>Submit Video Title</label><input type="text" id="pc-submitVideoTitle"></div>
+          <div class="form-g"><label>Your Videos Title</label><input type="text" id="pc-yourVideosTitle"></div>
+        </div>
+        <hr>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-p" id="portal-save-btn" onclick="savePortalContent()">Save Portal Content</button>
+          <button class="btn btn-s" id="portal-preview-btn" onclick="previewPortal()">Preview Portal</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="portal-preview-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9999;align-items:center;justify-content:center">
+    <div style="background:#fff;border-radius:12px;width:90%;max-width:900px;height:80vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #e1e3e5">
+        <h3 style="font-size:16px;font-weight:600">Creator Portal Preview</h3>
+        <button class="btn btn-link" onclick="closePortalPreview()" style="font-size:18px">&times; Close</button>
+      </div>
+      <iframe id="portal-preview-iframe" style="flex:1;border:none;width:100%" sandbox="allow-scripts"></iframe>
     </div>
   </div>
 
@@ -1501,6 +1599,102 @@ async function manualRegister(){
     document.getElementById("manual-title").value="";
     document.getElementById("manual-skus").value="";
   }
+}
+
+// ── Creator Portal ──
+let portalOpen=false;
+let portalLoaded=false;
+
+function togglePortal(){
+  portalOpen=!portalOpen;
+  document.getElementById("portal-panel").style.display=portalOpen?"block":"none";
+  document.getElementById("portal-toggle").textContent=portalOpen?"Collapse \\u25B4":"Expand \\u25BE";
+  if(portalOpen&&!portalLoaded){loadPortalContent()}
+}
+
+const portalFields=["pageTitle","signupCardTitle","pageSubtitle","pageSubtitle2","signupCardSubtitle","benefit1Title","benefit1Desc","benefit2Title","benefit2Desc","benefit3Title","benefit3Desc","termsHeading","term1Icon","term1Text","term2Icon","term2Text","term3Icon","term3Text","term4Icon","term4Text","dashboardTitle","submitVideoTitle","yourVideosTitle"];
+
+async function loadPortalContent(){
+  document.getElementById("portal-loading").style.display="block";
+  document.getElementById("portal-content").style.display="none";
+  document.getElementById("portal-error").style.display="none";
+  document.getElementById("portal-saved").style.display="none";
+  try{
+    var r=await api("GET","/api/portal-content");
+    if(r.ok&&r.content){
+      portalFields.forEach(function(f){
+        var el=document.getElementById("pc-"+f);
+        if(el)el.value=r.content[f]||"";
+      });
+      portalLoaded=true;
+    }else{
+      document.getElementById("portal-error").textContent=r.error||"Failed to load portal content";
+      document.getElementById("portal-error").style.display="block";
+    }
+  }catch(e){
+    document.getElementById("portal-error").textContent="Error: "+e.message;
+    document.getElementById("portal-error").style.display="block";
+  }
+  document.getElementById("portal-loading").style.display="none";
+  document.getElementById("portal-content").style.display="block";
+}
+
+function gatherPortalFields(){
+  var data={};
+  portalFields.forEach(function(f){
+    var el=document.getElementById("pc-"+f);
+    if(el)data[f]=el.value;
+  });
+  return data;
+}
+
+async function savePortalContent(){
+  var btn=document.getElementById("portal-save-btn");
+  btn.disabled=true;btn.textContent="Saving...";
+  document.getElementById("portal-saved").style.display="none";
+  document.getElementById("portal-error").style.display="none";
+  try{
+    var data=gatherPortalFields();
+    var r=await api("PUT","/api/portal-content",data);
+    if(r.ok){
+      document.getElementById("portal-saved").style.display="block";
+      setTimeout(function(){document.getElementById("portal-saved").style.display="none"},5000);
+    }else{
+      document.getElementById("portal-error").textContent=r.error||"Failed to save";
+      document.getElementById("portal-error").style.display="block";
+    }
+  }catch(e){
+    document.getElementById("portal-error").textContent="Error: "+e.message;
+    document.getElementById("portal-error").style.display="block";
+  }
+  btn.disabled=false;btn.textContent="Save Portal Content";
+}
+
+async function previewPortal(){
+  var btn=document.getElementById("portal-preview-btn");
+  btn.disabled=true;btn.textContent="Loading preview...";
+  try{
+    var data=gatherPortalFields();
+    var r=await api("POST","/api/portal-preview",data);
+    if(r.ok&&r.html){
+      var modal=document.getElementById("portal-preview-modal");
+      modal.style.display="flex";
+      var iframe=document.getElementById("portal-preview-iframe");
+      iframe.srcdoc=r.html;
+    }else{
+      document.getElementById("portal-error").textContent=r.error||"Preview failed";
+      document.getElementById("portal-error").style.display="block";
+    }
+  }catch(e){
+    document.getElementById("portal-error").textContent="Error: "+e.message;
+    document.getElementById("portal-error").style.display="block";
+  }
+  btn.disabled=false;btn.textContent="Preview Portal";
+}
+
+function closePortalPreview(){
+  document.getElementById("portal-preview-modal").style.display="none";
+  document.getElementById("portal-preview-iframe").srcdoc="";
 }
 
 // Wait for App Bridge iframe handshake before first API call
