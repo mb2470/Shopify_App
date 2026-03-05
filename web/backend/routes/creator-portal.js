@@ -418,11 +418,20 @@ const PORTAL_DEFAULTS = {
   dashboardTitle: "Creator Dashboard",
   submitVideoTitle: "Submit a Video",
   yourVideosTitle: "Your Videos",
+  showBenefits: true,
+  showTerms: true,
+  customCSS: "",
 };
 
 function esc(s) {
   if (!s) return "";
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function sanitizeHtml(s) {
+  if (!s) return "";
+  // Strip all tags except b, i, strong, em, a, br
+  return s.replace(/<(?!\/?(?:b|i|strong|em|a|br)\b)[^>]*>/gi, "");
 }
 
 export function renderPortalPage(pathPrefix, portalContent) {
@@ -492,6 +501,7 @@ export function renderPortalPage(pathPrefix, portalContent) {
   #oce-portal .top-bar .btn-logout:hover{background:#f6f6f7}
   #oce-portal a{color:#008060}
   #oce-portal .verify-input{text-align:center;font-size:28px;letter-spacing:10px;font-weight:700;padding:14px !important}
+  ${c.customCSS ? c.customCSS : ""}
 </style>
 
 <div id="oce-portal">
@@ -501,10 +511,10 @@ export function renderPortalPage(pathPrefix, portalContent) {
     <div class="auth-layout">
       <div class="portal-header">
         <h1>${esc(c.pageTitle).replace(/\{store\}/g, '<span class="store-name">this store</span>')}</h1>
-        <p>${esc(c.pageSubtitle)}</p>
-        <p>${esc(c.pageSubtitle2)}</p>
+        <p>${sanitizeHtml(c.pageSubtitle)}</p>
+        <p>${sanitizeHtml(c.pageSubtitle2)}</p>
 
-        <div class="benefits">
+        ${c.showBenefits !== false ? `<div class="benefits">
           <div class="benefit-card">
             <h3>${esc(c.benefit1Title)}</h3>
             <p>${esc(c.benefit1Desc)}</p>
@@ -517,15 +527,15 @@ export function renderPortalPage(pathPrefix, portalContent) {
             <h3>${esc(c.benefit3Title)}</h3>
             <p>${esc(c.benefit3Desc)}</p>
           </div>
-        </div>
+        </div>` : ""}
 
-        <h2>${esc(c.termsHeading)}</h2>
+        ${c.showTerms !== false ? `<h2>${esc(c.termsHeading)}</h2>
         <ul class="terms-list">
           <li><span class="terms-icon">${esc(c.term1Icon)}</span><span>${esc(c.term1Text)}</span></li>
           <li><span class="terms-icon">${esc(c.term2Icon)}</span><span>${esc(c.term2Text)}</span></li>
           <li><span class="terms-icon">${esc(c.term3Icon)}</span><span>${esc(c.term3Text).replace(/\{store\}/g, '<span class="store-name">this store</span>')}</span></li>
           <li><span class="terms-icon">${esc(c.term4Icon)}</span><span>${esc(c.term4Text).replace(/\{store\}/g, '<span class="store-name">this store</span>')}</span></li>
-        </ul>
+        </ul>` : ""}
       </div>
 
       <div class="portal-card">
