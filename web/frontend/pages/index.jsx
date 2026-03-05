@@ -27,6 +27,8 @@ import {
   Checkbox,
   Select,
   Thumbnail,
+  Modal,
+  Tabs,
 } from "@shopify/polaris";
 import {
   CheckCircleIcon,
@@ -40,7 +42,8 @@ import {
 } from "@shopify/polaris-icons";
 import { useLoaderData, useSubmit, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import { json } from "@remix-run/node";
-import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos } from "../backend/routes/settings.js";
+import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos, getPortalContent, savePortalContent, DEFAULT_PORTAL_CONTENT } from "../backend/routes/settings.js";
+import { renderPortalPage } from "../backend/routes/creator-portal.js";
 import { scanThemeForVideos } from "../backend/services/theme-scanner.js";
 import shopify from "../server.js";
 
@@ -50,12 +53,13 @@ export async function loader({ request }) {
   const { session } = await shopify.authenticate.admin(request);
   const shop = session.shop;
 
-  const [settings, status] = await Promise.all([
+  const [settings, status, portalContent] = await Promise.all([
     getSettings(shop),
     getIntegrationStatus(shop),
+    getPortalContent(shop),
   ]);
 
-  return json({ settings, status, shop });
+  return json({ settings, status, shop, portalContent });
 }
 
 export async function action({ request }) {
@@ -228,6 +232,16 @@ export async function action({ request }) {
         const regResult = await registerAssets(shop, assets);
         return json({ registerResult: regResult });
       }
+      case "save-portal-content": {
+        const content = JSON.parse(formData.get("content"));
+        const result = await savePortalContent(shop, content);
+        return json({ portalSaved: true, portalContent: result.content });
+      }
+      case "preview-portal": {
+        const content = JSON.parse(formData.get("content"));
+        const html = renderPortalPage("/apps/onsite-affiliate", content);
+        return json({ portalPreviewHtml: html });
+      }
       default:
         return json({ error: "Unknown action" }, { status: 400 });
     }
@@ -240,7 +254,7 @@ export async function action({ request }) {
 // ─── Main Component ───────────────────────────────────────────────
 
 export default function OceDashboard() {
-  const { settings, status, shop } = useLoaderData();
+  const { settings, status, shop, portalContent: loadedPortalContent } = useLoaderData();
   const actionData = useActionData();
   const submit = useSubmit();
   const navigation = useNavigation();
@@ -282,6 +296,42 @@ export default function OceDashboard() {
   const [manualSkus, setManualSkus] = useState("");
   const [manualCreator, setManualCreator] = useState("");
   const [manualError, setManualError] = useState("");
+
+  // ─── Creator Portal Content State ─────────────────────────
+  const [portalOpen, setPortalOpen] = useState(false);
+  const [portalFields, setPortalFields] = useState(loadedPortalContent || {});
+  const [portalPreviewHtml, setPortalPreviewHtml] = useState(null);
+  const [showPortalPreview, setShowPortalPreview] = useState(false);
+  const portalFetcher = useFetcher();
+  const portalSaving = portalFetcher.state === "submitting";
+
+  const handlePortalFieldChange = useCallback((field, value) => {
+    setPortalFields(prev => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleSavePortalContent = useCallback(() => {
+    const fd = new FormData();
+    fd.set("intent", "save-portal-content");
+    fd.set("content", JSON.stringify(portalFields));
+    portalFetcher.submit(fd, { method: "post" });
+  }, [portalFields, portalFetcher]);
+
+  const handlePreviewPortal = useCallback(() => {
+    const fd = new FormData();
+    fd.set("intent", "preview-portal");
+    fd.set("content", JSON.stringify(portalFields));
+    portalFetcher.submit(fd, { method: "post" });
+    setShowPortalPreview(true);
+  }, [portalFields, portalFetcher]);
+
+  useEffect(() => {
+    if (portalFetcher.data?.portalPreviewHtml) {
+      setPortalPreviewHtml(portalFetcher.data.portalPreviewHtml);
+    }
+    if (portalFetcher.data?.portalSaved) {
+      setPortalFields(portalFetcher.data.portalContent);
+    }
+  }, [portalFetcher.data]);
 
   // Process fetcher responses
   useEffect(() => {
@@ -719,95 +769,12 @@ export default function OceDashboard() {
           </Button>
         </InlineStack>
 
-        {/* ── Statistics ──────────────────────────────────────────── */}
-        <Card>
-          <BlockStack gap="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <Text variant="headingMd" as="h2">Statistics</Text>
-              <Button onClick={handleToggleStats} variant="plain">
-                {statsOpen ? "Collapse" : "Expand"}
-              </Button>
-            </InlineStack>
-            <Collapsible open={statsOpen} id="stats-collapsible">
-              <BlockStack gap="400">
-                <Divider />
-                <InlineStack gap="200">
-                  <ButtonGroup>
-                    <Button
-                      variant={statsPeriod === 7 ? "primary" : "secondary"}
-                      onClick={() => handleFetchStats(7)}
-                      size="slim"
-                    >
-                      7 days
-                    </Button>
-                    <Button
-                      variant={statsPeriod === 30 ? "primary" : "secondary"}
-                      onClick={() => handleFetchStats(30)}
-                      size="slim"
-                    >
-                      30 days
-                    </Button>
-                    <Button
-                      variant={statsPeriod === 90 ? "primary" : "secondary"}
-                      onClick={() => handleFetchStats(90)}
-                      size="slim"
-                    >
-                      90 days
-                    </Button>
-                  </ButtonGroup>
-                </InlineStack>
-                {statsLoading && (
-                  <Box padding="400">
-                    <InlineStack align="center">
-                      <Spinner size="small" />
-                      <Text variant="bodySm" tone="subdued">Loading statistics...</Text>
-                    </InlineStack>
-                  </Box>
-                )}
-                {statsData?.ok && statsData.data && !statsLoading && (
-                  <InlineGrid columns={4} gap="400">
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Total Exposures</Text>
-                        <Text variant="headingLg">{statsData.data.total_exposures.toLocaleString()}</Text>
-                      </BlockStack>
-                    </Box>
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Total Orders</Text>
-                        <Text variant="headingLg">{statsData.data.total_orders.toLocaleString()}</Text>
-                      </BlockStack>
-                    </Box>
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Total Revenue</Text>
-                        <Text variant="headingLg">${statsData.data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                      </BlockStack>
-                    </Box>
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <BlockStack gap="200">
-                        <Text variant="headingSm">Total Commission</Text>
-                        <Text variant="headingLg">${statsData.data.total_commission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
-                      </BlockStack>
-                    </Box>
-                  </InlineGrid>
-                )}
-                {statsData && !statsData.ok && !statsLoading && (
-                  <Banner tone="critical">
-                    {statsData.error || "Failed to load statistics"}
-                  </Banner>
-                )}
-              </BlockStack>
-            </Collapsible>
-          </BlockStack>
-        </Card>
-
-        {/* ── Asset Registration ───────────────────────────────── */}
+        {/* ── Video Asset Registration ────────────────────────── */}
         <Card>
           <BlockStack gap="400">
             <InlineStack align="space-between" blockAlign="center">
               <BlockStack gap="100">
-                <Text variant="headingMd" as="h2">Asset Registration</Text>
+                <Text variant="headingMd" as="h2">Video Asset Registration</Text>
                 <Text variant="bodySm" tone="subdued">
                   Register discovered videos as OCE assets and assign them to creators
                 </Text>
@@ -1011,6 +978,275 @@ export default function OceDashboard() {
             </Collapsible>
           </BlockStack>
         </Card>
+
+        {/* ── Statistics ──────────────────────────────────────────── */}
+        <Card>
+          <BlockStack gap="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text variant="headingMd" as="h2">Statistics</Text>
+              <Button onClick={handleToggleStats} variant="plain">
+                {statsOpen ? "Collapse" : "Expand"}
+              </Button>
+            </InlineStack>
+            <Collapsible open={statsOpen} id="stats-collapsible">
+              <BlockStack gap="400">
+                <Divider />
+                <InlineStack gap="200">
+                  <ButtonGroup>
+                    <Button
+                      variant={statsPeriod === 7 ? "primary" : "secondary"}
+                      onClick={() => handleFetchStats(7)}
+                      size="slim"
+                    >
+                      7 days
+                    </Button>
+                    <Button
+                      variant={statsPeriod === 30 ? "primary" : "secondary"}
+                      onClick={() => handleFetchStats(30)}
+                      size="slim"
+                    >
+                      30 days
+                    </Button>
+                    <Button
+                      variant={statsPeriod === 90 ? "primary" : "secondary"}
+                      onClick={() => handleFetchStats(90)}
+                      size="slim"
+                    >
+                      90 days
+                    </Button>
+                  </ButtonGroup>
+                </InlineStack>
+                {statsLoading && (
+                  <Box padding="400">
+                    <InlineStack align="center">
+                      <Spinner size="small" />
+                      <Text variant="bodySm" tone="subdued">Loading statistics...</Text>
+                    </InlineStack>
+                  </Box>
+                )}
+                {statsData?.ok && statsData.data && !statsLoading && (
+                  <InlineGrid columns={4} gap="400">
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Exposures</Text>
+                        <Text variant="headingLg">{statsData.data.total_exposures.toLocaleString()}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Orders</Text>
+                        <Text variant="headingLg">{statsData.data.total_orders.toLocaleString()}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Revenue</Text>
+                        <Text variant="headingLg">${statsData.data.total_revenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </BlockStack>
+                    </Box>
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">Total Commission</Text>
+                        <Text variant="headingLg">${statsData.data.total_commission.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+                      </BlockStack>
+                    </Box>
+                  </InlineGrid>
+                )}
+                {statsData && !statsData.ok && !statsLoading && (
+                  <Banner tone="critical">
+                    {statsData.error || "Failed to load statistics"}
+                  </Banner>
+                )}
+              </BlockStack>
+            </Collapsible>
+          </BlockStack>
+        </Card>
+
+        {/* ── Creator Portal ─────────────────────────────────────── */}
+        <Card>
+          <BlockStack gap="400">
+            <InlineStack align="space-between" blockAlign="center">
+              <BlockStack gap="100">
+                <Text variant="headingMd" as="h2">Creator Portal</Text>
+                <Text variant="bodySm" tone="subdued">
+                  Edit the copy and content displayed on your creator signup portal
+                </Text>
+              </BlockStack>
+              <Button onClick={() => setPortalOpen(!portalOpen)} variant="plain">
+                {portalOpen ? "Collapse" : "Expand"}
+              </Button>
+            </InlineStack>
+            <Collapsible open={portalOpen} id="portal-collapsible">
+              <BlockStack gap="400">
+                <Divider />
+                {portalFetcher.data?.portalSaved && (
+                  <Banner tone="success" onDismiss={() => {}}>
+                    Portal content saved successfully.
+                  </Banner>
+                )}
+
+                {/* Page Header */}
+                <Text variant="headingSm" as="h3">Page Header</Text>
+                <InlineGrid columns={2} gap="300">
+                  <TextField
+                    label="Page Title"
+                    value={portalFields.pageTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("pageTitle", v)}
+                    autoComplete="off"
+                    helpText="Use {store} for the store name"
+                  />
+                  <TextField
+                    label="Signup Card Title"
+                    value={portalFields.signupCardTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("signupCardTitle", v)}
+                    autoComplete="off"
+                  />
+                </InlineGrid>
+                <TextField
+                  label="Page Subtitle"
+                  value={portalFields.pageSubtitle || ""}
+                  onChange={(v) => handlePortalFieldChange("pageSubtitle", v)}
+                  autoComplete="off"
+                  multiline={2}
+                />
+                <TextField
+                  label="Page Subtitle (line 2)"
+                  value={portalFields.pageSubtitle2 || ""}
+                  onChange={(v) => handlePortalFieldChange("pageSubtitle2", v)}
+                  autoComplete="off"
+                  multiline={2}
+                />
+                <TextField
+                  label="Signup Card Subtitle"
+                  value={portalFields.signupCardSubtitle || ""}
+                  onChange={(v) => handlePortalFieldChange("signupCardSubtitle", v)}
+                  autoComplete="off"
+                />
+
+                {/* Benefit Cards */}
+                <Divider />
+                <Text variant="headingSm" as="h3">Benefit Cards</Text>
+                {[1, 2, 3].map((n) => (
+                  <InlineGrid columns={2} gap="300" key={`benefit-${n}`}>
+                    <TextField
+                      label={`Benefit ${n} Title`}
+                      value={portalFields[`benefit${n}Title`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`benefit${n}Title`, v)}
+                      autoComplete="off"
+                    />
+                    <TextField
+                      label={`Benefit ${n} Description`}
+                      value={portalFields[`benefit${n}Desc`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`benefit${n}Desc`, v)}
+                      autoComplete="off"
+                    />
+                  </InlineGrid>
+                ))}
+
+                {/* Terms */}
+                <Divider />
+                <Text variant="headingSm" as="h3">Key Terms</Text>
+                <TextField
+                  label="Terms Section Heading"
+                  value={portalFields.termsHeading || ""}
+                  onChange={(v) => handlePortalFieldChange("termsHeading", v)}
+                  autoComplete="off"
+                />
+                {[1, 2, 3, 4].map((n) => (
+                  <InlineGrid columns={{ xs: 1, md: "70px 1fr" }} gap="300" key={`term-${n}`}>
+                    <TextField
+                      label={`Icon ${n}`}
+                      value={portalFields[`term${n}Icon`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`term${n}Icon`, v)}
+                      autoComplete="off"
+                    />
+                    <TextField
+                      label={`Term ${n} Text`}
+                      value={portalFields[`term${n}Text`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`term${n}Text`, v)}
+                      autoComplete="off"
+                      helpText="Use {store} for the store name"
+                    />
+                  </InlineGrid>
+                ))}
+
+                {/* Dashboard Labels */}
+                <Divider />
+                <Text variant="headingSm" as="h3">Dashboard Labels</Text>
+                <InlineGrid columns={3} gap="300">
+                  <TextField
+                    label="Dashboard Title"
+                    value={portalFields.dashboardTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("dashboardTitle", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Submit Video Title"
+                    value={portalFields.submitVideoTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("submitVideoTitle", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Your Videos Title"
+                    value={portalFields.yourVideosTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("yourVideosTitle", v)}
+                    autoComplete="off"
+                  />
+                </InlineGrid>
+
+                {/* Actions */}
+                <Divider />
+                <InlineStack gap="200">
+                  <Button
+                    variant="primary"
+                    onClick={handleSavePortalContent}
+                    loading={portalSaving}
+                  >
+                    Save Portal Content
+                  </Button>
+                  <Button
+                    onClick={handlePreviewPortal}
+                    loading={portalSaving}
+                  >
+                    Preview Portal
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Collapsible>
+          </BlockStack>
+        </Card>
+
+        {/* Portal Preview Modal */}
+        {showPortalPreview && portalPreviewHtml && (
+          <Modal
+            open={showPortalPreview}
+            onClose={() => setShowPortalPreview(false)}
+            title="Creator Portal Preview"
+            size="large"
+          >
+            <Modal.Section>
+              <div
+                style={{
+                  border: "1px solid #e1e3e5",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  background: "#fff",
+                }}
+              >
+                <iframe
+                  srcDoc={portalPreviewHtml}
+                  style={{
+                    width: "100%",
+                    height: "700px",
+                    border: "none",
+                  }}
+                  title="Portal Preview"
+                  sandbox="allow-scripts"
+                />
+              </div>
+            </Modal.Section>
+          </Modal>
+        )}
 
         {/* ── How It Works ──────────────────────────────────────── */}
         <Card>

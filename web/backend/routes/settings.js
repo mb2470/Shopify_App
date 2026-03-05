@@ -493,8 +493,67 @@ export async function getDiscoveredVideos(shop) {
   }
 }
 
+/**
+ * Default creator portal copy — used when no custom content is saved.
+ */
+export const DEFAULT_PORTAL_CONTENT = {
+  pageTitle: "Join {store} as an Onsite Creator",
+  pageSubtitle: "Upload engaging video content about our products and if we place it on our site you can earn commissions on every sale that your videos help drive.",
+  pageSubtitle2: "Log back in here to track your performance and get paid your commissions.",
+  benefit1Title: "Upload Your Content",
+  benefit1Desc: "Share your product videos and we will track every view, click, and engagement.",
+  benefit2Title: "Real-Time Analytics",
+  benefit2Desc: "See exactly how your video content performs with detailed attribution insights.",
+  benefit3Title: "Earn Commissions",
+  benefit3Desc: "Get paid for every sale attributed to your content. Transparent payouts, always.",
+  termsHeading: "Key Terms Summary",
+  term1Icon: "\ud83d\udcc4",
+  term1Text: "You retain ownership of your video content. You grant us a license to sublicense for ecommerce placements.",
+  term2Icon: "$",
+  term2Text: "Commission rates and tracking terms are displayed on your Dashboard.",
+  term3Icon: "\ud83d\udc41",
+  term3Text: "Onsite placements are not guaranteed. {store} will exclusively decide which video content appears on their site.",
+  term4Icon: "\u23f1",
+  term4Text: "30-day removal window: After you remove a video from your Dashboard, {store} will remove it from their site within 30 days.",
+  signupCardTitle: "Create Your Account",
+  signupCardSubtitle: "Start earning in minutes",
+  dashboardTitle: "Creator Dashboard",
+  submitVideoTitle: "Submit a Video",
+  yourVideosTitle: "Your Videos",
+};
+
+/**
+ * GET /api/portal-content
+ * Retrieve editable portal copy for a shop
+ */
+export async function getPortalContent(shop) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings) return { ...DEFAULT_PORTAL_CONTENT };
+  try {
+    const saved = JSON.parse(settings.portalContent || "{}");
+    return { ...DEFAULT_PORTAL_CONTENT, ...saved };
+  } catch {
+    return { ...DEFAULT_PORTAL_CONTENT };
+  }
+}
+
+/**
+ * PUT /api/portal-content
+ * Save editable portal copy for a shop
+ */
+export async function savePortalContent(shop, content) {
+  const merged = { ...DEFAULT_PORTAL_CONTENT, ...content };
+  await prisma.oceSettings.upsert({
+    where: { shop },
+    create: { shop, portalContent: JSON.stringify(merged) },
+    update: { portalContent: JSON.stringify(merged) },
+  });
+  return { success: true, content: merged };
+}
+
 export default {
   getSettings, updateSettings, updateApiKey, getIntegrationStatus,
   syncAppMetafields, getAppMetafields, getStatsOverview,
   getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos,
+  getPortalContent, savePortalContent, DEFAULT_PORTAL_CONTENT,
 };

@@ -397,10 +397,22 @@ proxyRouter.use((req, res, next) => {
   next();
 });
 
-proxyRouter.get("/", (req, res) => {
+proxyRouter.get("/", async (req, res) => {
   const pathPrefix = req.query.path_prefix || "/apps/onsite-affiliate";
+  const shop = req.query.shop;
+  let portalContent = null;
+  if (shop) {
+    try {
+      const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+      if (settings?.portalContent) {
+        portalContent = JSON.parse(settings.portalContent);
+      }
+    } catch (err) {
+      console.warn("[Proxy] Failed to load portal content:", err.message);
+    }
+  }
   res.set("Content-Type", "application/liquid");
-  res.send(renderPortalPage(pathPrefix));
+  res.send(renderPortalPage(pathPrefix, portalContent));
 });
 
 proxyRouter.post("/api/signup", handleSignup);

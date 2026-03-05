@@ -31,6 +31,7 @@ model OceSettings {
   apiKey              String   @default("")
   sdkEnabled          Boolean  @default(true)
   webhookEnabled      Boolean  @default(true)
+  portalContent       String   @default("{}") // JSON blob of editable creator portal copy
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
