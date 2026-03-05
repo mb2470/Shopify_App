@@ -394,8 +394,40 @@ export async function handleGetStats(req, res) {
 
 // ─── Portal Page Renderer ───────────────────────────────────────
 
-export function renderPortalPage(pathPrefix) {
+const PORTAL_DEFAULTS = {
+  pageTitle: "Join {store} as an Onsite Creator",
+  pageSubtitle: "Upload engaging video content about our products and if we place it on our site you can earn commissions on every sale that your videos help drive.",
+  pageSubtitle2: "Log back in here to track your performance and get paid your commissions.",
+  benefit1Title: "Upload Your Content",
+  benefit1Desc: "Share your product videos and we will track every view, click, and engagement.",
+  benefit2Title: "Real-Time Analytics",
+  benefit2Desc: "See exactly how your video content performs with detailed attribution insights.",
+  benefit3Title: "Earn Commissions",
+  benefit3Desc: "Get paid for every sale attributed to your content. Transparent payouts, always.",
+  termsHeading: "Key Terms Summary",
+  term1Icon: "\ud83d\udcc4",
+  term1Text: "You retain ownership of your video content. You grant us a license to sublicense for ecommerce placements.",
+  term2Icon: "$",
+  term2Text: "Commission rates and tracking terms are displayed on your Dashboard.",
+  term3Icon: "\ud83d\udc41",
+  term3Text: "Onsite placements are not guaranteed. {store} will exclusively decide which video content appears on their site.",
+  term4Icon: "\u23f1",
+  term4Text: "30-day removal window: After you remove a video from your Dashboard, {store} will remove it from their site within 30 days.",
+  signupCardTitle: "Create Your Account",
+  signupCardSubtitle: "Start earning in minutes",
+  dashboardTitle: "Creator Dashboard",
+  submitVideoTitle: "Submit a Video",
+  yourVideosTitle: "Your Videos",
+};
+
+function esc(s) {
+  if (!s) return "";
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+export function renderPortalPage(pathPrefix, portalContent) {
   var apiBase = pathPrefix + "/api";
+  var c = { ...PORTAL_DEFAULTS, ...(portalContent || {}) };
 
   return `
 <style>
@@ -468,37 +500,37 @@ export function renderPortalPage(pathPrefix) {
   <div id="auth-view" class="portal-view">
     <div class="auth-layout">
       <div class="portal-header">
-        <h1>Join <span class="store-name">this store</span> as an Onsite Creator</h1>
-        <p>Upload engaging video content about our products and if we place it on our site you can earn commissions on every sale that your videos help drive.</p>
-        <p>Log back in here to track your performance and get paid your commissions.</p>
+        <h1>${esc(c.pageTitle).replace(/\{store\}/g, '<span class="store-name">this store</span>')}</h1>
+        <p>${esc(c.pageSubtitle)}</p>
+        <p>${esc(c.pageSubtitle2)}</p>
 
         <div class="benefits">
           <div class="benefit-card">
-            <h3>Upload Your Content</h3>
-            <p>Share your product videos and we will track every view, click, and engagement.</p>
+            <h3>${esc(c.benefit1Title)}</h3>
+            <p>${esc(c.benefit1Desc)}</p>
           </div>
           <div class="benefit-card">
-            <h3>Real-Time Analytics</h3>
-            <p>See exactly how your video content performs with detailed attribution insights.</p>
+            <h3>${esc(c.benefit2Title)}</h3>
+            <p>${esc(c.benefit2Desc)}</p>
           </div>
           <div class="benefit-card">
-            <h3>Earn Commissions</h3>
-            <p>Get paid for every sale attributed to your content. Transparent payouts, always.</p>
+            <h3>${esc(c.benefit3Title)}</h3>
+            <p>${esc(c.benefit3Desc)}</p>
           </div>
         </div>
 
-        <h2>Key Terms Summary</h2>
+        <h2>${esc(c.termsHeading)}</h2>
         <ul class="terms-list">
-          <li><span class="terms-icon">📄</span><span>You retain ownership of your video content. You grant us a license to sublicense for ecommerce placements.</span></li>
-          <li><span class="terms-icon">$</span><span>Commission rates and tracking terms are displayed on your Dashboard.</span></li>
-          <li><span class="terms-icon">👁</span><span>Onsite placements are not guaranteed. <span class="store-name">this store</span> will exclusively decide which video content appears on their site.</span></li>
-          <li><span class="terms-icon">⏱</span><span>30-day removal window: After you remove a video from your Dashboard, <span class="store-name">this store</span> will remove it from their site within 30 days.</span></li>
+          <li><span class="terms-icon">${esc(c.term1Icon)}</span><span>${esc(c.term1Text)}</span></li>
+          <li><span class="terms-icon">${esc(c.term2Icon)}</span><span>${esc(c.term2Text)}</span></li>
+          <li><span class="terms-icon">${esc(c.term3Icon)}</span><span>${esc(c.term3Text).replace(/\{store\}/g, '<span class="store-name">this store</span>')}</span></li>
+          <li><span class="terms-icon">${esc(c.term4Icon)}</span><span>${esc(c.term4Text).replace(/\{store\}/g, '<span class="store-name">this store</span>')}</span></li>
         </ul>
       </div>
 
       <div class="portal-card">
-      <h2>Create Your Account</h2>
-      <p>Start earning with Hypeach in minutes</p>
+      <h2>${esc(c.signupCardTitle)}</h2>
+      <p>${esc(c.signupCardSubtitle)}</p>
       <div class="tabs">
         <button class="tab active" id="tab-signup" onclick="oceShowTab('signup')">Sign Up</button>
         <button class="tab" id="tab-login" onclick="oceShowTab('login')">Log In</button>
@@ -567,7 +599,7 @@ export function renderPortalPage(pathPrefix) {
     <div class="portal-header">
       <div class="top-bar">
         <div>
-          <h1>Creator Dashboard</h1>
+          <h1>${esc(c.dashboardTitle)}</h1>
           <p>Welcome back, <strong id="dash-name"></strong></p>
         </div>
         <button class="btn-logout" onclick="oceLogout()">Log Out</button>
@@ -582,7 +614,7 @@ export function renderPortalPage(pathPrefix) {
     </div>
 
     <div class="portal-card">
-      <h2>Submit a Video</h2>
+      <h2>${esc(c.submitVideoTitle)}</h2>
       <form onsubmit="oceSubmitVideo(event)">
         <div class="form-group">
           <label for="vid-title">Video Title</label>
@@ -604,7 +636,7 @@ export function renderPortalPage(pathPrefix) {
     </div>
 
     <div class="portal-card">
-      <h2>Your Videos</h2>
+      <h2>${esc(c.yourVideosTitle)}</h2>
       <div id="video-list">
         <p class="empty-state">No videos submitted yet. Submit your first video above!</p>
       </div>
