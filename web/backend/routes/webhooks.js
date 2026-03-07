@@ -52,6 +52,10 @@ export async function handleOrderCreated(shop, orderData) {
 
   // 4. Extract exposure IDs from order note attributes or cart attributes
   const exposureIds = extractExposureIds(orderData);
+  const noteAttrs = (orderData.note_attributes || []).map((a) => ({ name: a.name, value: a.value }));
+  if (noteAttrs.length > 0) {
+    console.log(`[OCE] Order ${shopifyOrderId} note_attributes (${noteAttrs.length}):`, JSON.stringify(noteAttrs.slice(0, 30)));
+  }
 
   // 5. Extract session ID from note attributes
   const sessionAttr = (orderData.note_attributes || []).find(
@@ -70,8 +74,6 @@ export async function handleOrderCreated(shop, orderData) {
       },
     });
 
-    // Debug: log what Shopify sent so you can verify cart attributes → note_attributes
-    const noteAttrs = (orderData.note_attributes || []).map((a) => ({ name: a.name, value: a.value }));
     console.log(`[OCE] Skipping order ${shopifyOrderId} — no exposure IDs/session ID. note_attributes sample:`, JSON.stringify(noteAttrs.slice(0, 20)));
     return { status: "skipped", reason: "missing_attribution_identifiers" };
   }

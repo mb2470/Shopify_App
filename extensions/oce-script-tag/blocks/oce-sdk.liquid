@@ -7,7 +7,7 @@
 {% if app.metafields.oce.api_key != blank %}
   <!-- Onsite Commission Engine SDK -->
   <script
-    src="https://app.onsiteaffiliate.com/sdk/oce.min.js?v=1.2.4"
+    src="https://app.onsiteaffiliate.com/sdk/oce.min.js?v=1.2.5"
     data-api-key="{{ app.metafields.oce.api_key }}"
     defer
   ></script>
@@ -34,19 +34,51 @@
       return sessionId;
     }
 
-    function updateCartAttributes(exposureIds) {
+    function updateCartAttributes(exposureIds, retryCount) {
+      retryCount = retryCount || 0;
+      var payload = {
+        attributes: {
+          '_oce_exposure_ids': JSON.stringify(exposureIds),
+          '_oce_session_id': getSessionId()
+        }
+      };
+      var bodyStr = JSON.stringify(payload);
       fetch('/cart/update.js', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: bodyStr
+      })
+      .then(function(r) {
+        if (!r.ok && retryCount < 1) {
+          return updateCartAttributes(exposureIds, retryCount + 1);
+        }
+        if (!r.ok) {
+          console.warn('[OCE] Cart attributes update failed:', r.status, r.statusText);
+        }
+      })
+      .catch(function(err) {
+        if (retryCount < 1) {
+          updateCartAttributes(exposureIds, retryCount + 1);
+        } else {
+          console.warn('[OCE] Failed to update cart attributes:', err);
+        }
+      });
+    }
+
+    function sendCartAttributesBeacon(exposureIds) {
+      try {
+        var payload = {
           attributes: {
             '_oce_exposure_ids': JSON.stringify(exposureIds),
             '_oce_session_id': getSessionId()
           }
-        })
-      }).catch(function(err) {
-        console.warn('[OCE] Failed to update cart attributes:', err);
-      });
+        };
+        var blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+        if (navigator.sendBeacon && navigator.sendBeacon('/cart/update.js', blob)) {
+          return true;
+        }
+      } catch (e) {}
+      return false;
     }
 
     // ── Exposure event listener (stores in session + cart) ─────────
@@ -268,12 +300,17 @@
     // ── Sync sessionStorage → cart (so order gets exposure_ids) ─────
     // Run on init, cart page, before unload, and when tab becomes visible
     // so exposure IDs are on the cart before checkout even if user navigates quickly.
-    function syncStoredExposuresToCart() {
+    function syncStoredExposuresToCart(useBeacon) {
       try {
         var raw = sessionStorage.getItem('_oce_exposure_ids');
         if (!raw) return;
         var stored = JSON.parse(raw);
-        if (stored.length > 0) updateCartAttributes(stored);
+        if (stored.length === 0) return;
+        if (useBeacon) {
+          sendCartAttributesBeacon(stored);
+        } else {
+          updateCartAttributes(stored);
+        }
       } catch(e) {}
     }
 
@@ -284,22 +321,26 @@
       observer.observe(document.body, { childList: true, subtree: true });
 
       // Re-sync any exposures from a previous page in this session
-      syncStoredExposuresToCart();
+      syncStoredExposuresToCart(false);
 
-      // If we're on the cart page, sync again so cart has latest before checkout
+      // If we're on the cart page, sync immediately and again after short delays
+      // so exposure IDs are on the cart before checkout even if user clicks Checkout quickly.
       if (typeof window.location !== 'undefined' && /\/cart(\?|$)/.test(window.location.pathname || '')) {
-        syncStoredExposuresToCart();
+        syncStoredExposuresToCart(false);
+        setTimeout(function() { syncStoredExposuresToCart(false); }, 200);
+        setTimeout(function() { syncStoredExposuresToCart(false); }, 600);
       }
     });
 
-    // Before user leaves (e.g. clicks Checkout), push any pending exposures to cart
+    // Before user leaves (e.g. clicks Checkout), use sendBeacon so the request
+    // is not cancelled when the page unloads (fetch is often aborted on navigation).
     window.addEventListener('beforeunload', function() {
-      syncStoredExposuresToCart();
+      syncStoredExposuresToCart(true);
     });
 
     // When tab becomes visible (e.g. returning to tab before checkout), re-sync
     document.addEventListener('visibilitychange', function() {
-      if (document.visibilityState === 'visible') syncStoredExposuresToCart();
+      if (document.visibilityState === 'visible') syncStoredExposuresToCart(false);
     });
   })();
 </script>

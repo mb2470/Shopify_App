@@ -153,6 +153,37 @@ The app communicates with the OCE REST API at `https://app.onsiteaffiliate.com`:
 
 All requests use `X-API-Key` header authentication.
 
+## Troubleshooting: Exposure IDs not on orders / attributes missing in notes
+
+If the order webhook or pixels don’t see `_oce_exposure_ids` or `_oce_session_id` in the order’s note attributes, the cart never had those attributes at checkout time. The SDK writes them via the Cart API; Shopify copies cart attributes into the order as `note_attributes`.
+
+### What the app expects
+
+- **Cart attributes** (set by the storefront SDK): `_oce_exposure_ids` (JSON array of strings), `_oce_session_id` (string).
+- **Order payload**: Same names appear in `order.note_attributes`. The webhook reads those and sends them to the OCE API.
+
+### Common causes and fixes
+
+1. **User leaves before the cart update runs**  
+   The SDK now uses `navigator.sendBeacon` on `beforeunload` so a cart update is sent when the user navigates to checkout (e.g. clicks “Checkout”), and it retries failed `fetch` once. Ensure the theme has the OCE SDK block enabled and that no script is blocking or overriding `beforeunload`.
+
+2. **Checkout without visiting cart**  
+   If the theme sends users straight to checkout (e.g. “Buy now”), they may never hit the cart page where we sync. The SDK syncs on DOMContentLoaded, visibilitychange, and (with beacon) beforeunload. For “Buy now” flows, attributes are only attached if an earlier page view already synced exposures to the cart (e.g. they had the cart open in another tab or had previously added to cart and we had synced).
+
+3. **`oce is not defined` (oce.min.js)**  
+   This usually comes from the external `oce.min.js` script or another script expecting `window.oce` before it’s set. The app’s **inline** logic does not depend on `oce`; it creates exposures via the `/apps/onsite-affiliate/exposure` proxy and listens for `oce:exposure`. If the external SDK is optional for your flow, you can still get exposures and cart attributes. If you rely on the external script, ensure it loads (e.g. correct `app.metafields.oce.api_key`) and that nothing runs before it defines `oce`.
+
+4. **401 on thank-you / checkout**  
+   A 401 for something like `private_access_token` or checkout URLs is typically from Shopify’s checkout or another app, not from the OCE exposure proxy. The exposure endpoint is `/apps/onsite-affiliate/exposure` (POST); it uses the app proxy and expects `shop` in the query. If you see 401s on that URL, check proxy configuration and that the storefront is calling the proxy with the correct `shop` (Shopify usually appends it).
+
+5. **Verify what Shopify sends**  
+   When the webhook runs, the app logs `[OCE] Order <id> note_attributes (N): [...]` for every order. Check your server logs for that line to see whether `_oce_exposure_ids` and `_oce_session_id` are present. If they’re missing there, the fix is on the storefront/cart side (above). If they’re present but a pixel or other consumer doesn’t see them, the issue is with that consumer reading `note_attributes`.
+
+### Quick checks on the storefront
+
+- Open DevTools → Application → Local Storage / Session Storage: look for `_oce_session_id` and `_oce_exposure_ids` after playing a tracked video.
+- On the cart page, open Network, then click “Checkout”: you should see a POST to `cart/update.js` and/or a `sendBeacon` to `cart/update.js` with the OCE attributes before the redirect.
+
 ## License
 
 Private — built for use with [onsiteaffiliate.com](https://onsiteaffiliate.com)
