@@ -51,10 +51,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ─── Middleware ────────────────────────────────────────────────────
-
+// Webhooks must get raw body for HMAC; do not parse JSON for /webhooks/*
 app.post("/webhooks/*", express.raw({ type: "application/json" }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  if (req.originalUrl && req.originalUrl.startsWith("/webhooks")) return next();
+  express.json()(req, res, next);
+});
+app.use((req, res, next) => {
+  if (req.originalUrl && req.originalUrl.startsWith("/webhooks")) return next();
+  express.urlencoded({ extended: true })(req, res, next);
+});
 app.use(
   "/admin-v2-assets",
   express.static(path.join(__dirname, "frontend", "admin-v2"), { maxAge: "5m" })
