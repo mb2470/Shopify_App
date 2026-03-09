@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="shopify-api-key" content="" />
+  <title>Onsite Commission Engine - Brand Dashboard</title>
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+  <link rel="stylesheet" href="/admin-v2-assets/styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div>
+        <h1>Onsite Commission Engine</h1>
+        <p>Brand dashboard (v2 migration)</p>
+      </div>
+      <a class="btn btn-primary" href="https://app.onsiteaffiliate.com/dashboard" target="_blank" rel="noreferrer">View OCE Dashboard</a>
+    </header>
+
+    <div id="error-banner" class="banner banner-error hidden"></div>
+    <div id="success-banner" class="banner banner-success hidden"></div>
+
+    <section class="card">
+      <div class="card-title-row">
+        <h2>Integration Status</h2>
+        <span id="overall-status" class="badge">Loading...</span>
+      </div>
+      <div class="status-grid">
+        <div class="status-item">
+          <h3>SDK Script</h3>
+          <p id="sdk-message">Loading...</p>
+          <span id="sdk-status" class="badge">-</span>
+        </div>
+        <div class="status-item">
+          <h3>Order Webhook</h3>
+          <p id="webhook-message">Loading...</p>
+          <span id="webhook-status" class="badge">-</span>
+        </div>
+        <div class="status-item">
+          <h3>API Connection</h3>
+          <p id="api-message">Loading...</p>
+          <span id="api-status" class="badge">-</span>
+        </div>
+      </div>
+      <div class="actions-row">
+        <button id="diagnose-webhook" class="btn">Diagnose webhook</button>
+      </div>
+      <pre id="webhook-debug" class="debug hidden"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <div class="row">
+        <label class="switch">
+          <input id="sdk-enabled" type="checkbox" />
+          <span>SDK enabled</span>
+        </label>
+        <label class="switch">
+          <input id="webhook-enabled" type="checkbox" />
+          <span>Webhook enabled</span>
+        </label>
+      </div>
+      <div class="row">
+        <input id="api-key" type="password" placeholder="oce_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+      </div>
+      <div class="actions-row">
+        <button id="save-settings" class="btn btn-primary">Save settings</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/admin-v2-assets/app.js"></script>
+</body>
+</html>

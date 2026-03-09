@@ -11,6 +11,8 @@
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
+import path from "path";
+import { fileURLToPath } from "url";
 import { PrismaClient } from "@prisma/client";
 import { OceApiService } from "./backend/services/oce-api.js";
 import { scanThemeForVideos } from "./backend/services/theme-scanner.js";
@@ -45,12 +47,18 @@ import {
 const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3000;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // ─── Middleware ────────────────────────────────────────────────────
 
 app.post("/webhooks/*", express.raw({ type: "application/json" }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(
+  "/admin-v2-assets",
+  express.static(path.join(__dirname, "frontend", "admin-v2"), { maxAge: "5m" })
+);
 
 // ─── Shopify Auth Helpers ─────────────────────────────────────────
 
@@ -922,6 +930,15 @@ app.put("/api/portal-content", authenticate, async (req, res) => {
 
 // ─── Admin UI ─────────────────────────────────────────────────────
 
+app.get("/app", (req, res) => {
+  // Allow embedding in Shopify Admin
+  res.setHeader(
+    "Content-Security-Policy",
+    "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
+  );
+  res.sendFile(path.join(__dirname, "frontend", "admin-v2", "index.html"));
+});
+
 app.get("/", (req, res) => {
   const { shop, host } = req.query;
   // Set Content-Security-Policy to allow Shopify Admin to embed this app
@@ -929,6 +946,9 @@ app.get("/", (req, res) => {
     "Content-Security-Policy",
     "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
   );
+  if (req.query.ui === "v2") {
+    return res.sendFile(path.join(__dirname, "frontend", "admin-v2", "index.html"));
+  }
   res.send(getAdminHTML(shop || "", host || ""));
 });
 
