@@ -1,0 +1,23 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "9a1136ea754ac3983f65321382021385"
+name = "TGA Test"
+application_url = "https://example.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-01"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_analytics,read_cart_transforms,write_cart_transforms,read_all_cart_transforms,read_validations,read_checkouts,read_custom_pixels,write_custom_pixels,read_customers,read_price_rules,read_discounts,read_metaobject_definitions,read_metaobjects,write_metaobjects,read_order_edits,read_orders,read_product_feeds,read_product_listings,read_products,read_reports,read_script_tags,write_script_tags,read_pixels,write_pixels,customer_read_customers,customer_read_metaobjects,customer_read_orders,unauthenticated_read_bulk_operations,unauthenticated_read_checkouts,unauthenticated_read_customers,unauthenticated_read_customer_tags,unauthenticated_read_metaobjects"
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [ ]
+
+[app_proxy]
+url = "https://shopify-app-q4bw.onrender.com/proxy"
+subpath = "onsite-affiliate"
+prefix = "apps"
