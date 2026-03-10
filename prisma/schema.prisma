@@ -31,6 +31,7 @@ model OceSettings {
   apiKey              String   @default("")
   sdkEnabled          Boolean  @default(true)
   webhookEnabled      Boolean  @default(true)
+  interceptAttribution Boolean @default(true)  // Intercept checkout/buy-now to sync cart attrs (400ms cap); brands can turn OFF
   portalContent       String   @default("{}") // JSON blob of editable creator portal copy
 
   createdAt           DateTime @default(now())

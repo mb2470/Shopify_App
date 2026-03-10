@@ -1076,6 +1076,10 @@ function getAdminHTML(shop, host) {
       <p style="font-size:13px;color:#6d7175;margin-top:12px">Order details and exposure IDs sent to OCE REST API on checkout.</p>
       <div id="ro" style="margin-top:12px"></div>
     </div>
+    <div class="card"><div class="card-row"><div><h2>Intercept checkout / Buy now</h2><p style="font-size:13px;color:#6d7175">Sync cart attribution before redirect (400ms cap); turn OFF if a brand objects</p></div>
+      <div class="tog" onclick="tIntercept()"><div id="it" class="tog-t on"><div class="tog-th"></div></div></div></div>
+      <p style="font-size:12px;color:#6d7175;margin-top:8px">Default: ON. When ON, clicks to checkout or buy-now trigger a quick cart-attribute sync then redirect.</p>
+    </div>
   </div>
 
   <div class="card">
@@ -1249,7 +1253,7 @@ function getAdminHTML(shop, host) {
 
 <script>
 const S="${shop}",B="";
-let st={sdk:true,wh:true,key:false};
+let st={sdk:true,wh:true,intercept:true,key:false};
 console.log("[init] shop:",S,"shopify obj:",typeof window.shopify,"idToken:",typeof (window.shopify&&window.shopify.idToken));
 
 // ── Diagnostic: verify what App Bridge actually sees ──
@@ -1323,7 +1327,7 @@ async function load(){
   try{
     const s=await api("GET","/api/settings");
     if(s.hasApiKey){document.getElementById("kd").style.display="block";document.getElementById("kf").style.display="none";document.getElementById("mk").textContent=s.apiKey;document.getElementById("qs").style.display="none";document.getElementById("pk").textContent=s.apiKey}
-    tog("st",s.sdkEnabled);tog("wt",s.webhookEnabled);st.sdk=s.sdkEnabled;st.wh=s.webhookEnabled;
+    tog("st",s.sdkEnabled);tog("wt",s.webhookEnabled);tog("it",s.interceptAttribution!==false);st.sdk=s.sdkEnabled;st.wh=s.webhookEnabled;st.intercept=s.interceptAttribution!==false;
   }catch(e){console.log("Settings load pending auth")}
   try{
     const x=await api("GET","/api/settings/status");
@@ -1447,6 +1451,7 @@ async function loadStats(days){
 function tog(id,v){const e=document.getElementById(id);if(v)e.classList.add("on");else e.classList.remove("on")}
 async function tSdk(){st.sdk=!st.sdk;tog("st",st.sdk);document.getElementById("sc").style.display=st.sdk?"block":"none";try{await api("PUT","/api/settings",{sdkEnabled:st.sdk})}catch(e){console.error("Toggle SDK error:",e);st.sdk=!st.sdk;tog("st",st.sdk)}}
 async function tWh(){st.wh=!st.wh;tog("wt",st.wh);try{await api("PUT","/api/settings",{webhookEnabled:st.wh})}catch(e){console.error("Toggle webhook error:",e);st.wh=!st.wh;tog("wt",st.wh)}}
+async function tIntercept(){st.intercept=!st.intercept;tog("it",st.intercept);try{await api("PUT","/api/settings",{interceptAttribution:st.intercept})}catch(e){console.error("Toggle intercept error:",e);st.intercept=!st.intercept;tog("it",st.intercept)}}
 
 // ── Video Asset Registration ──
 let assetsOpen=false;

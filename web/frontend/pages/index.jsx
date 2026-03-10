@@ -267,6 +267,7 @@ export default function OceDashboard() {
   // ─── Settings State ──────────────────────────────────────────
   const [sdkEnabled, setSdkEnabled] = useState(settings.sdkEnabled);
   const [webhookEnabled, setWebhookEnabled] = useState(settings.webhookEnabled);
+  const [interceptAttribution, setInterceptAttribution] = useState(settings.interceptAttribution !== false);
 
   // ─── Stats State ───────────────────────────────────────────
   const [statsOpen, setStatsOpen] = useState(false);
@@ -484,10 +485,10 @@ export default function OceDashboard() {
     formData.set("intent", "save-settings");
     formData.set(
       "settings",
-      JSON.stringify({ sdkEnabled, webhookEnabled })
+      JSON.stringify({ sdkEnabled, webhookEnabled, interceptAttribution })
     );
     submit(formData, { method: "post" });
-  }, [sdkEnabled, webhookEnabled, submit]);
+  }, [sdkEnabled, webhookEnabled, interceptAttribution, submit]);
 
   // ─── Status Badge Helper ─────────────────────────────────────
 
@@ -734,6 +735,24 @@ export default function OceDashboard() {
                 <Text variant="bodySm" tone="subdued">
                   When a Shopify order is placed, the order details and any tracked exposure IDs
                   are automatically sent to the OCE REST API for commission attribution.
+                </Text>
+                <Divider />
+                <InlineStack align="space-between" blockAlign="center">
+                  <BlockStack gap="100">
+                    <Text variant="headingMd" as="h2">Intercept checkout / Buy now</Text>
+                    <Text variant="bodySm" tone="subdued">
+                      Sync cart attribution before redirect (400ms cap); turn OFF if a brand objects
+                    </Text>
+                  </BlockStack>
+                  <Button
+                    variant={interceptAttribution ? "primary" : "secondary"}
+                    onClick={() => setInterceptAttribution(!interceptAttribution)}
+                  >
+                    {interceptAttribution ? "On" : "Off"}
+                  </Button>
+                </InlineStack>
+                <Text variant="bodySm" tone="subdued">
+                  Default: On. When on, checkout and buy-now clicks trigger a quick cart-attribute sync then redirect.
                 </Text>
                 {status.recentOrders?.length > 0 && (
                   <Box padding="300" background="bg-surface-secondary" borderRadius="200">

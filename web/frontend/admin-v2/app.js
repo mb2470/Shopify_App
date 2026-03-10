@@ -13,6 +13,7 @@ const els = {
   apiMsg: document.getElementById("api-message"),
   sdkEnabled: document.getElementById("sdk-enabled"),
   webhookEnabled: document.getElementById("webhook-enabled"),
+  interceptAttribution: document.getElementById("intercept-attribution"),
   apiKey: document.getElementById("api-key"),
   webhookDebug: document.getElementById("webhook-debug"),
   diagnoseWebhook: document.getElementById("diagnose-webhook"),
@@ -86,6 +87,7 @@ async function loadStatus() {
 
   els.sdkEnabled.checked = !!settings.sdkEnabled;
   els.webhookEnabled.checked = !!settings.webhookEnabled;
+  els.interceptAttribution.checked = settings.interceptAttribution !== false;
 }
 
 async function diagnoseWebhook() {
@@ -106,6 +108,7 @@ async function saveSettings() {
   const updates = {
     sdkEnabled: els.sdkEnabled.checked,
     webhookEnabled: els.webhookEnabled.checked,
+    interceptAttribution: els.interceptAttribution.checked,
   };
   await api("PUT", "/api/settings", updates);
 

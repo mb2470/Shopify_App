@@ -23,6 +23,7 @@ export async function getSettings(shop) {
         apiKey: "",
         sdkEnabled: true,
         webhookEnabled: true,
+        interceptAttribution: true,
       },
     });
   }
@@ -47,6 +48,7 @@ export async function updateSettings(shop, updates) {
   const allowedFields = [
     "sdkEnabled",
     "webhookEnabled",
+    "interceptAttribution",
   ];
 
   // Filter to allowed fields only
@@ -192,7 +194,7 @@ export async function syncAppMetafields(shop, accessToken) {
   // This is required for app.metafields.oce.* to be readable in Liquid
   await ensureMetafieldDefinitions(graphqlUrl, headers);
 
-  // Step 3: Write both metafields the Liquid template expects
+  // Step 3: Write metafields the Liquid template expects (api_key, sdk_enabled, intercept_attribution)
   const metafields = [
     {
       namespace: "oce",
@@ -206,6 +208,13 @@ export async function syncAppMetafields(shop, accessToken) {
       key: "sdk_enabled",
       type: "single_line_text_field",
       value: String(settings.sdkEnabled),
+      ownerId,
+    },
+    {
+      namespace: "oce",
+      key: "intercept_attribution",
+      type: "single_line_text_field",
+      value: String(settings.interceptAttribution !== false),
       ownerId,
     },
   ];
@@ -256,6 +265,7 @@ async function ensureMetafieldDefinitions(graphqlUrl, headers) {
   const definitions = [
     { name: "OCE API Key", namespace: "oce", key: "api_key" },
     { name: "OCE SDK Enabled", namespace: "oce", key: "sdk_enabled" },
+    { name: "OCE Intercept Attribution", namespace: "oce", key: "intercept_attribution" },
   ];
 
   for (const def of definitions) {

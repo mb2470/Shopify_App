@@ -4,6 +4,9 @@
   API key is synced automatically from the app dashboard via metafields.
 {% endcomment %}
 
+{% comment %} Optionality: default ON; set to 'false' in app to disable checkout/buy-now intercept. {% endcomment %}
+<script>window._oceInterceptAttribution = {% if app.metafields.oce.intercept_attribution == 'false' %}false{% else %}true{% endif %};</script>
+
 {% if app.metafields.oce.api_key != blank %}
   <!-- Onsite Commission Engine SDK -->
   <script
@@ -79,6 +82,77 @@
         }
       } catch (e) {}
       return false;
+    }
+
+    // ── Intercept: checkout / buy-now — 400ms cap, redirect regardless, minimal payload ──
+    var INTERCEPT_MAX_MS = 400;
+
+    function getStoredExposureIds() {
+      try {
+        var raw = sessionStorage.getItem('_oce_exposure_ids');
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) { return []; }
+    }
+
+    function minimalCartSyncOnce(exposureIds, maxMs) {
+      if (!exposureIds || exposureIds.length === 0) return;
+      var payload = {
+        attributes: {
+          '_oce_exposure_ids': JSON.stringify(exposureIds),
+          '_oce_session_id': getSessionId()
+        }
+      };
+      var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var id = controller ? setTimeout(function() { controller.abort(); }, maxMs) : null;
+      fetch('/cart/update.js', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller ? controller.signal : undefined
+      }).then(function() {}).catch(function() {}).then(function() {
+        if (id) clearTimeout(id);
+      });
+    }
+
+    function isCheckoutUrl(url) {
+      if (!url || typeof url !== 'string') return false;
+      try {
+        var path = url.indexOf('//') !== -1 ? (new URL(url)).pathname : url;
+        return path.indexOf('/checkout') === 0 || path.indexOf('/checkout') !== -1;
+      } catch (e) { return url.indexOf('/checkout') !== -1; }
+    }
+
+    function setupIntercept() {
+      if (window._oceInterceptAttribution === false) return;
+
+      document.addEventListener('click', function(ev) {
+        if (window._oceInterceptAttribution === false) return;
+
+        var link = ev.target && ev.target.closest ? ev.target.closest('a') : null;
+        if (link && link.href && isCheckoutUrl(link.href)) {
+          ev.preventDefault();
+          var targetUrl = link.href;
+          minimalCartSyncOnce(getStoredExposureIds(), INTERCEPT_MAX_MS);
+          setTimeout(function() { window.location.href = targetUrl; }, INTERCEPT_MAX_MS);
+          return;
+        }
+
+        var form = ev.target && ev.target.closest ? ev.target.closest('form') : null;
+        if (form) {
+          var formAction = (form.action || '').toString();
+          var goesToCheckout = isCheckoutUrl(formAction);
+          if (!goesToCheckout && (formAction.indexOf('/cart/add') !== -1 || formAction.indexOf('/cart') === 0)) {
+            var returnInput = form.querySelector('input[name="return_to"]');
+            var returnTo = returnInput ? returnInput.value : '';
+            goesToCheckout = returnTo.indexOf('/checkout') !== -1;
+          }
+          if (goesToCheckout) {
+            ev.preventDefault();
+            minimalCartSyncOnce(getStoredExposureIds(), INTERCEPT_MAX_MS);
+            setTimeout(function() { form.submit(); }, INTERCEPT_MAX_MS);
+          }
+        }
+      }, true);
     }
 
     // ── Exposure event listener (stores in session + cart) ─────────
@@ -319,6 +393,7 @@
     document.addEventListener('DOMContentLoaded', function() {
       scanDOM();
       observer.observe(document.body, { childList: true, subtree: true });
+      setupIntercept();
 
       // Re-sync any exposures from a previous page in this session
       syncStoredExposuresToCart(false);

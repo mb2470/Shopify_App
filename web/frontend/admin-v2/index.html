@@ -60,7 +60,12 @@
           <input id="webhook-enabled" type="checkbox" />
           <span>Webhook enabled</span>
         </label>
+        <label class="switch">
+          <input id="intercept-attribution" type="checkbox" />
+          <span>Intercept checkout / Buy now</span>
+        </label>
       </div>
+      <p class="row hint">Intercept: sync cart attribution before redirect (400ms cap). Default on; turn off if a brand objects.</p>
       <div class="row">
         <input id="api-key" type="password" placeholder="oce_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
       </div>
