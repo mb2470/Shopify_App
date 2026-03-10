@@ -465,11 +465,17 @@ proxyRouter.get("/api/videos", handleGetVideos);
 proxyRouter.get("/api/stats", handleCreatorStats);
 
 proxyRouter.post("/exposure", async (req, res) => {
-  const shopDomain = req.query.shop || req.headers["x-shopify-shop-domain"];
+  const hostHeader = (req.headers.host || "").toString().toLowerCase();
+  const hostShop = hostHeader.endsWith(".myshopify.com") ? hostHeader : null;
+  const shopDomain =
+    (req.query.shop || "").toString().trim() ||
+    (req.headers["x-shopify-shop-domain"] || "").toString().trim() ||
+    hostShop;
   if (!shopDomain) {
     console.warn("[OCE] Proxy exposure missing shop domain", {
       queryShop: req.query.shop,
       headerShop: req.headers["x-shopify-shop-domain"],
+      host: req.headers.host,
     });
     return res.status(400).json({ error: "Missing shop domain" });
   }
@@ -477,7 +483,7 @@ proxyRouter.post("/exposure", async (req, res) => {
   const settings = await prisma.oceSettings.findUnique({ where: { shop: shopDomain } });
   if (!settings?.apiKey) {
     console.warn("[OCE] Proxy exposure skipped: OCE API key not configured for", shopDomain);
-    return res.status(500).json({ error: "OCE not configured" });
+    return res.status(400).json({ error: "OCE not configured" });
   }
 
   const { asset_id, session_id, sku, creator_external_id } = req.body || {};
