@@ -257,6 +257,67 @@ export async function syncAppMetafields(shop, accessToken) {
 }
 
 /**
+ * Activate the OCE Checkout Pixel (web pixel extension) on the store.
+ * Called after install when we have an API key. Requires write_pixels and read_customer_events scopes.
+ * @param {string} shop - Shop domain (e.g. store.myshopify.com)
+ * @param {string} accessToken - Shopify Admin API access token
+ * @param {string} apiKey - OCE API key (ock_...) for pixel-collect
+ * @param {string} pixelEndpointUrl - Full URL to pixel-collect (e.g. https://xxx.supabase.co/functions/v1/pixel-collect)
+ * @returns {{ success: boolean, error?: string }}
+ */
+export async function activateWebPixel(shop, accessToken, apiKey, pixelEndpointUrl) {
+  if (!apiKey || !pixelEndpointUrl) {
+    return { success: false, error: "apiKey and pixelEndpointUrl are required" };
+  }
+  const apiVersion = "2024-10";
+  const graphqlUrl = `https://${shop}/admin/api/${apiVersion}/graphql.json`;
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Shopify-Access-Token": accessToken,
+  };
+  const pixelSettings = {
+    api_key: apiKey,
+    pixel_endpoint: pixelEndpointUrl,
+  };
+  try {
+    const res = await fetch(graphqlUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        query: `mutation webPixelCreate($webPixel: WebPixelInput!) {
+          webPixelCreate(webPixel: $webPixel) {
+            userErrors { field message code }
+            webPixel { id settings }
+          }
+        }`,
+        variables: {
+          webPixel: { settings: pixelSettings },
+        },
+      }),
+    });
+    const data = await res.json();
+    if (data.errors) {
+      console.error("[OCE] webPixelCreate GraphQL errors:", JSON.stringify(data.errors));
+      return { success: false, error: data.errors[0]?.message || "GraphQL error" };
+    }
+    const payload = data?.data?.webPixelCreate;
+    const userErrors = payload?.userErrors || [];
+    if (userErrors.length > 0) {
+      console.error("[OCE] webPixelCreate userErrors:", JSON.stringify(userErrors));
+      return { success: false, error: userErrors.map((e) => e.message).join("; ") };
+    }
+    if (payload?.webPixel?.id) {
+      console.log("[OCE] Web pixel activated for", shop, "— id:", payload.webPixel.id);
+      return { success: true };
+    }
+    return { success: false, error: "No webPixel in response" };
+  } catch (err) {
+    console.error("[OCE] activateWebPixel failed:", err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
  * Ensure metafield definitions exist with PUBLIC_READ storefront access.
  * Without definitions, app metafields may not be accessible in Liquid.
  * Idempotent — silently ignores "already exists" errors.

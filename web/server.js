@@ -23,6 +23,7 @@ import {
   updateApiKey,
   getIntegrationStatus,
   syncAppMetafields,
+  activateWebPixel,
   getAppMetafields,
   getStatsOverview,
   getCreators,
@@ -72,7 +73,7 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 const SHOPIFY_APP_URL = process.env.SHOPIFY_APP_URL;
 const SCOPES =
-  "read_orders,write_orders,read_customers,read_products,read_script_tags,write_script_tags";
+  "read_orders,write_orders,read_customers,read_products,read_script_tags,write_script_tags,write_pixels,read_customer_events";
 
 // Startup diagnostics — shows if env vars are loaded
 console.log("[env] SHOPIFY_API_KEY:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING!");
@@ -179,6 +180,16 @@ app.get("/auth/callback", async (req, res) => {
         });
         const syncResult = await syncAppMetafields(shop, access_token);
         console.log("[OCE] Auto API key from install; metafield sync:", syncResult?.success ? "ok" : syncResult?.error);
+      }
+    }
+
+    // Activate OCE Checkout Pixel so attribution works on checkout (e.g. Buy Now)
+    const currentSettings = await prisma.oceSettings.findUnique({ where: { shop } });
+    const pixelEndpoint = process.env.OCE_PIXEL_COLLECT_URL;
+    if (currentSettings?.apiKey && pixelEndpoint) {
+      const pixelResult = await activateWebPixel(shop, access_token, currentSettings.apiKey, pixelEndpoint);
+      if (!pixelResult.success) {
+        console.warn("[OCE] Web pixel activation skipped or failed:", pixelResult.error);
       }
     }
 
@@ -626,6 +637,14 @@ app.put("/api/settings/api-key", authenticate, async (req, res) => {
     // Sync to Shopify app metafields so the Liquid theme extension can read them
     const syncResult = await syncAppMetafields(req.shop, req.session.accessToken);
     console.log("[OCE] API key sync result:", JSON.stringify(syncResult));
+    // Activate OCE Checkout Pixel when API key is set (so pixel works for Buy Now, etc.)
+    const pixelEndpoint = process.env.OCE_PIXEL_COLLECT_URL;
+    if (req.body.apiKey && pixelEndpoint) {
+      const pixelResult = await activateWebPixel(req.shop, req.session.accessToken, req.body.apiKey, pixelEndpoint);
+      if (!pixelResult.success) {
+        console.warn("[OCE] Web pixel activation on API key save:", pixelResult.error);
+      }
+    }
     res.json({ ...result, metafieldSync: syncResult });
   } catch (err) {
     console.error("[OCE] PUT /api/settings/api-key error:", err);
