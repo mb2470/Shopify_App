@@ -6,6 +6,45 @@
 
 const OCE_BASE_URL = "https://mqhtzepjrudposuedqbu.supabase.co/functions/v1";
 
+/**
+ * On install: ask Onsite Affiliate to create an API token for this Shopify shop.
+ * Requires env OCE_INSTALL_URL and OCE_INSTALL_SECRET (server-to-server).
+ * Returns { api_key } or null if not configured / request failed.
+ */
+export async function createTokenForShop(shop) {
+  const installUrl = process.env.OCE_INSTALL_URL;
+  const installSecret = process.env.OCE_INSTALL_SECRET;
+  if (!installUrl || !installSecret) {
+    return null;
+  }
+  try {
+    const response = await fetch(installUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": installSecret,
+      },
+      body: JSON.stringify({ shop }),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.warn("[OCE] Install API non-OK:", response.status, text.slice(0, 200));
+      return null;
+    }
+    const data = await response.json().catch(() => ({}));
+    const apiKey = data.api_key || data.apiKey || null;
+    if (apiKey) {
+      console.log("[OCE] Install API returned API key for", shop);
+      return { api_key: apiKey };
+    }
+    console.warn("[OCE] Install API response missing api_key:", Object.keys(data));
+    return null;
+  } catch (err) {
+    console.error("[OCE] Install API error:", err.message);
+    return null;
+  }
+}
+
 export class OceApiService {
   constructor(apiKey) {
     this.apiKey = apiKey;

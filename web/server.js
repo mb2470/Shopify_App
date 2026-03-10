@@ -14,7 +14,7 @@ import crypto from "crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 import { PrismaClient } from "@prisma/client";
-import { OceApiService } from "./backend/services/oce-api.js";
+import { OceApiService, createTokenForShop } from "./backend/services/oce-api.js";
 import { scanThemeForVideos } from "./backend/services/theme-scanner.js";
 import { handleOrderCreated } from "./backend/routes/webhooks.js";
 import {
@@ -168,6 +168,19 @@ app.get("/auth/callback", async (req, res) => {
       create: { shop },
       update: {},
     });
+
+    const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+    if (settings && !settings.apiKey) {
+      const tokenResult = await createTokenForShop(shop);
+      if (tokenResult?.api_key) {
+        await prisma.oceSettings.update({
+          where: { shop },
+          data: { apiKey: tokenResult.api_key },
+        });
+        const syncResult = await syncAppMetafields(shop, access_token);
+        console.log("[OCE] Auto API key from install; metafield sync:", syncResult?.success ? "ok" : syncResult?.error);
+      }
+    }
 
     await registerWebhooks(shop, access_token);
 

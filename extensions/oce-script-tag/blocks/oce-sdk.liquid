@@ -172,8 +172,13 @@
         if (stored.length > 50) stored = stored.slice(-50);
         try {
           sessionStorage.setItem('_oce_exposure_ids', JSON.stringify(stored));
-        } catch(e) {}
+          localStorage.setItem('_oce_exposure_ids', JSON.stringify(stored));
+        } catch (e) {}
       }
+
+      try {
+        localStorage.setItem('_oce_session_id', getSessionId());
+      } catch (e) {}
 
       updateCartAttributes(stored);
     });
@@ -380,6 +385,10 @@
         if (!raw) return;
         var stored = JSON.parse(raw);
         if (stored.length === 0) return;
+        try {
+          localStorage.setItem('_oce_exposure_ids', JSON.stringify(stored));
+          localStorage.setItem('_oce_session_id', getSessionId());
+        } catch (e) {}
         if (useBeacon) {
           sendCartAttributesBeacon(stored);
         } else {

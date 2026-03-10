@@ -46,10 +46,11 @@ A Shopify embedded app that integrates with the [Onsite Commission Engine (OCE)]
 ## Features
 
 ### 1. OCE SDK Auto-Injection
-- Injects the OCE tracking script into your storefront via theme app extension
-- Auto-detects Videowise, Tolstoy, Firework, YouTube, Vimeo, and HTML5 video players
-- Handles session persistence and event deduplication
-- Stores exposure IDs in Shopify cart attributes for order attribution
+- Injects the OCE tracking script into your storefront via a **theme app extension** (app embed block, `target: head`).
+- **Enable on all pages:** In the theme editor go to **Theme settings → App embeds** and enable **OCE Tracking SDK** (or **OCE Script**). When enabled, the SDK loads on every page (home, collection, product, cart, etc.) so all video engagements are tracked, not only on product or cart.
+- Auto-detects Videowise, Tolstoy, Firework, YouTube, Vimeo, and HTML5 video players.
+- Handles session persistence and event deduplication.
+- Stores exposure IDs in Shopify cart attributes and in `localStorage` (for pixel fallback); order webhook and optional Custom Pixel use them for attribution.
 
 ### 2. Order Webhook → OCE API
 - Listens for `orders/create` webhooks from Shopify
@@ -60,7 +61,7 @@ A Shopify embedded app that integrates with the [Onsite Commission Engine (OCE)]
 **Important:** In OCE/Onsite Affiliate, the ID that links a video engagement to an order is the **exposure_id** (returned from the exposure creation endpoint). The app stores these in cart attributes so the order webhook can send them as `exposure_ids`; the backend expects exactly that field name.
 
 ### 3. Admin Dashboard
-- **API Key Management**: Merchants enter and validate their OCE API key
+- **API Key Management**: Merchants can paste their OCE API key manually, or the app can **auto-create one on install** (see below).
 - **Integration Status**: Real-time health monitoring of SDK, webhook, and API connection
 - **Attribution Settings**: Configure model (first/last touch), window, commission rates
 - **Qualifying Events**: Toggle impression, click, and watch progress tracking
@@ -101,6 +102,15 @@ npm run dev
 3. Add required scopes: `read_orders`, `write_script_tags`, `read_products`, `read_customers`
 4. Configure the `orders/create` webhook
 5. Copy the API key and secret to your `.env` file
+
+### Optional: Auto-create OCE API key on install
+
+If you run the Onsite Affiliate backend and expose an install endpoint, set in `.env`:
+
+- **OCE_INSTALL_URL** — Full URL of the install endpoint (e.g. `https://…/functions/v1/integrations/shopify/install`).
+- **OCE_INSTALL_SECRET** — Server-to-server secret (sent as `X-API-Key` when calling the install endpoint).
+
+On Shopify app install (OAuth callback), the app will `POST` `{ shop }` to that URL; the backend should return `{ api_key }`. The app then stores the key and syncs it to the storefront (metafields), so the merchant does not need to paste an API key. If these env vars are not set or the request fails, the merchant can still add an API key manually in the dashboard.
 
 ## Project Structure
 
