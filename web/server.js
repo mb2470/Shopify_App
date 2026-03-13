@@ -1045,16 +1045,14 @@ app.get("/app", (req, res) => {
 });
 
 app.get("/", (req, res) => {
-  const { shop, host } = req.query;
-  // Set Content-Security-Policy to allow Shopify Admin to embed this app
+  // Primary Shopify embedded app entrypoint.
+  // Always serve the new admin-v2 dashboard shell so brand admins
+  // see the updated dashboard without needing a query flag.
   res.setHeader(
     "Content-Security-Policy",
     "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
   );
-  if (req.query.ui === "v2") {
-    return res.sendFile(path.join(__dirname, "frontend", "admin-v2", "index.html"));
-  }
-  res.send(getAdminHTML(shop || "", host || ""));
+  res.sendFile(path.join(__dirname, "frontend", "admin-v2", "index.html"));
 });
 
 function getAdminHTML(shop, host) {

@@ -22,10 +22,9 @@ A **Shopify Custom Pixel** (Customer events) that subscribes to `checkout_comple
 
 ## Recommended pixel (checkout_completed)
 
-Uses `checkout.attributes`, falls back to `browser.localStorage`, tolerates missing/invalid JSON, includes event metadata, and uses `fetch(..., { keepalive: true })` as Shopify recommends for pixels. Replace the endpoint URL and `YOUR_API_KEY` as needed.
+Uses `checkout.attributes`, falls back to `browser.localStorage`. **api_key must be in the request body** (Shopify sandbox strips custom headers). Line items must include `qty`, `price`, `revenue` for pixel-collect. Replace endpoint URL and `YOUR_API_KEY` as needed.
 
 ```javascript
-// Shopify Custom Pixel — checkout_completed
 analytics.subscribe("checkout_completed", async (event) => {
   try {
     const checkout = event?.data?.checkout;
@@ -37,81 +36,57 @@ analytics.subscribe("checkout_completed", async (event) => {
       return hit ? hit.value : null;
     };
 
-    let exposureIdsRaw =
-      getAttr("_oce_exposure_ids") || getAttr("oce_exposure_ids");
-    let sessionId =
-      getAttr("_oce_session_id") || getAttr("oce_session_id");
-    let oaId =
-      getAttr("_oce_oa_id") || getAttr("oce_oa_id");
+    let exposureIdsRaw = getAttr("oce_exposure_ids") || getAttr("_oce_exposure_ids");
+    let sessionId = getAttr("oce_session_id") || getAttr("_oce_session_id");
+    let oaId = getAttr("oce_oa_id") || getAttr("_oce_oa_id");
 
-    // Fallback to browser storage for Buy Now / fast checkout
+    // Fallback to browser storage
     if (!exposureIdsRaw) {
-      exposureIdsRaw =
-        (await browser.localStorage.getItem("_oce_exposure_ids")) ||
-        (await browser.localStorage.getItem("oce_exposure_ids")) ||
-        null;
+      exposureIdsRaw = (await browser.localStorage.getItem("_oce_exposure_ids")) ||
+        (await browser.localStorage.getItem("oce_exposure_ids")) || null;
     }
     if (!sessionId) {
-      sessionId =
-        (await browser.localStorage.getItem("_oce_session_id")) ||
-        (await browser.localStorage.getItem("oce_session_id")) ||
-        null;
+      sessionId = (await browser.localStorage.getItem("_oce_session_id")) ||
+        (await browser.localStorage.getItem("oce_session_id")) || null;
     }
     if (!oaId) {
-      oaId =
-        (await browser.localStorage.getItem("_oce_oa_id")) ||
-        (await browser.localStorage.getItem("oce_oa_id")) ||
-        null;
+      oaId = (await browser.localStorage.getItem("_oce_oa_id")) ||
+        (await browser.localStorage.getItem("oce_oa_id")) || null;
     }
 
     let exposureIds = [];
     if (exposureIdsRaw) {
       try {
-        const parsed =
-          typeof exposureIdsRaw === "string"
-            ? JSON.parse(exposureIdsRaw)
-            : exposureIdsRaw;
+        const parsed = typeof exposureIdsRaw === "string" ? JSON.parse(exposureIdsRaw) : exposureIdsRaw;
         exposureIds = Array.isArray(parsed) ? parsed : [parsed];
-      } catch {
-        exposureIds = [];
-      }
+      } catch { exposureIds = []; }
     }
 
     const lineItems = Array.isArray(checkout.lineItems)
       ? checkout.lineItems.map((li) => ({
-          title: li?.title || null,
-          sku: li?.variant?.sku || null,
-          quantity: li?.quantity || 0,
-          variant_id: li?.variant?.id ? String(li.variant.id) : null,
-          product_id: li?.variant?.product?.id
-            ? String(li.variant.product.id)
-            : null,
+          sku: li?.variant?.sku || li?.variant?.id?.toString() || "unknown",
+          product_id: li?.variant?.product?.id ? String(li.variant.product.id) : undefined,
+          variant_id: li?.variant?.id ? String(li.variant.id) : undefined,
+          qty: li?.quantity || 1,
+          price: li?.variant?.price?.amount ? Number(li.variant.price.amount) : 0,
+          revenue: (li?.variant?.price?.amount ? Number(li.variant.price.amount) : 0) * (li?.quantity || 1),
         }))
       : [];
 
     const payload = {
-      event_name: event.name,
-      event_id: event.id,
-      event_timestamp: event.timestamp,
-      client_id: event.clientId || null,
+      api_key: "YOUR_API_KEY",  // MUST be in body, not header (Shopify sandbox strips custom headers)
       order_id: checkout?.order?.id ? String(checkout.order.id) : null,
-      checkout_token: checkout?.token ? String(checkout.token) : null,
+      ts: event.timestamp || new Date().toISOString(),
       currency: checkout?.currencyCode || "USD",
-      total_price: checkout?.totalPrice?.amount
-        ? Number(checkout.totalPrice.amount)
-        : null,
       exposure_ids: exposureIds,
-      session_id: sessionId || null,
-      oa_id: oaId || null,
+      session_id: sessionId || undefined,
+      oa_id: oaId || undefined,
       line_items: lineItems,
     };
 
     await fetch("https://mqhtzepjrudposuedqbu.supabase.co/functions/v1/pixel-collect", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": "YOUR_API_KEY",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       keepalive: true,
     });
