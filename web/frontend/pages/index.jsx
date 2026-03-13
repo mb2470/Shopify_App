@@ -29,6 +29,7 @@ import {
   Thumbnail,
   Modal,
   Tabs,
+  IndexTable,
 } from "@shopify/polaris";
 import {
   CheckCircleIcon,
@@ -42,7 +43,7 @@ import {
 } from "@shopify/polaris-icons";
 import { useLoaderData, useSubmit, useActionData, useNavigation, useFetcher } from "@remix-run/react";
 import { json } from "@remix-run/node";
-import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, registerAssets, getRegisteredAssets, getDiscoveredVideos, getPortalContent, savePortalContent, DEFAULT_PORTAL_CONTENT } from "../backend/routes/settings.js";
+import { getSettings, updateSettings, updateApiKey, getIntegrationStatus, syncAppMetafields, getStatsOverview, getCreators, getRecentOrders, getPayouts, getAttributionSettings, updateAttributionSettings, registerAssets, getRegisteredAssets, getDiscoveredVideos, getPortalContent, savePortalContent, DEFAULT_PORTAL_CONTENT } from "../backend/routes/settings.js";
 import { renderPortalPage } from "../backend/routes/creator-portal.js";
 import { scanThemeForVideos } from "../backend/services/theme-scanner.js";
 import shopify from "../server.js";
@@ -53,13 +54,38 @@ export async function loader({ request }) {
   const { session } = await shopify.authenticate.admin(request);
   const shop = session.shop;
 
-  const [settings, status, portalContent] = await Promise.all([
+  const [settings, status, portalContent, statsResult, creatorsResult, ordersResult, payoutsResult, attributionResult] = await Promise.all([
     getSettings(shop),
     getIntegrationStatus(shop),
     getPortalContent(shop),
+    getStatsOverview(shop, 30),
+    getCreators(shop),
+    getRecentOrders(shop, 10),
+    getPayouts(shop),
+    getAttributionSettings(shop),
   ]);
 
-  return json({ settings, status, shop, portalContent });
+  const stats = statsResult?.data || statsResult || {};
+
+  return json({
+    settings,
+    status,
+    shop,
+    portalContent,
+    dashboard: {
+      stats: {
+        total_exposures: Number(stats.totalExposures ?? stats.total_exposures) || 0,
+        total_orders: Number(stats.totalOrders ?? stats.total_orders) || 0,
+        total_revenue: Number(stats.totalRevenue ?? stats.total_revenue) || 0,
+        total_commission: Number(stats.totalCommission ?? stats.total_commission) || 0,
+      },
+      creators: creatorsResult?.creators || [],
+      orders: ordersResult?.orders || [],
+      payouts: payoutsResult?.payouts || [],
+      payoutTotalAmount: payoutsResult?.totalAmount || 0,
+      attributionSettings: attributionResult?.settings || {},
+    },
+  });
 }
 
 export async function action({ request }) {
@@ -83,6 +109,11 @@ export async function action({ request }) {
         const syncResult = await syncAppMetafields(shop, session.accessToken);
         console.log("[OCE] Remix settings sync result:", JSON.stringify(syncResult));
         return json({ success: true, settings: result, metafieldSync: syncResult });
+      }
+      case "save-attribution-settings": {
+        const updates = JSON.parse(formData.get("settings"));
+        const result = await updateAttributionSettings(shop, updates);
+        return json({ attributionSaved: true, attributionResult: result });
       }
       case "fetch-stats": {
         const periodDays = parseInt(formData.get("periodDays")) || 30;
@@ -254,11 +285,12 @@ export async function action({ request }) {
 // ─── Main Component ───────────────────────────────────────────────
 
 export default function OceDashboard() {
-  const { settings, status, shop, portalContent: loadedPortalContent } = useLoaderData();
+  const { settings, status, shop, portalContent: loadedPortalContent, dashboard } = useLoaderData();
   const actionData = useActionData();
   const submit = useSubmit();
   const navigation = useNavigation();
   const isLoading = navigation.state === "submitting";
+  const [selectedTab, setSelectedTab] = useState(0);
 
   // ─── API Key State ───────────────────────────────────────────
   const [apiKey, setApiKey] = useState("");
@@ -305,6 +337,13 @@ export default function OceDashboard() {
   const [showPortalPreview, setShowPortalPreview] = useState(false);
   const portalFetcher = useFetcher();
   const portalSaving = portalFetcher.state === "submitting";
+  const [attributionSettings, setAttributionSettings] = useState({
+    attribution_model: dashboard.attributionSettings?.attribution_model || "last_touch",
+    view_window_days: dashboard.attributionSettings?.view_window_days ?? 7,
+    click_window_days: dashboard.attributionSettings?.click_window_days ?? 30,
+    default_commission_rate: dashboard.attributionSettings?.default_commission_rate ?? 0.05,
+    qualifying_events: dashboard.attributionSettings?.qualifying_events || ["click", "watch_start"],
+  });
 
   const handlePortalFieldChange = useCallback((field, value) => {
     setPortalFields(prev => ({ ...prev, [field]: value }));
@@ -490,6 +529,31 @@ export default function OceDashboard() {
     submit(formData, { method: "post" });
   }, [sdkEnabled, webhookEnabled, interceptAttribution, submit]);
 
+  const handleAttributionFieldChange = useCallback((field, value) => {
+    setAttributionSettings((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleToggleQualifyingEvent = useCallback((eventName, checked) => {
+    setAttributionSettings((prev) => {
+      const next = checked
+        ? [...new Set([...prev.qualifying_events, eventName])]
+        : prev.qualifying_events.filter((value) => value !== eventName);
+      return { ...prev, qualifying_events: next.length ? next : prev.qualifying_events };
+    });
+  }, []);
+
+  const handleSaveAttributionSettings = useCallback(() => {
+    const formData = new FormData();
+    formData.set("intent", "save-attribution-settings");
+    formData.set("settings", JSON.stringify({
+      ...attributionSettings,
+      view_window_days: Number(attributionSettings.view_window_days) || 7,
+      click_window_days: Number(attributionSettings.click_window_days) || 30,
+      default_commission_rate: Number(attributionSettings.default_commission_rate) || 0,
+    }));
+    submit(formData, { method: "post" });
+  }, [attributionSettings, submit]);
+
   // ─── Status Badge Helper ─────────────────────────────────────
 
   const StatusBadge = ({ status: s }) => {
@@ -497,7 +561,7 @@ export default function OceDashboard() {
       active: { tone: "success", label: "Active" },
       connected: { tone: "success", label: "Connected" },
       healthy: { tone: "success", label: "Healthy" },
-      disabled: { tone: "warning", label: "Disabled" },
+      disabled: { tone: "attention", label: "Disabled" },
       inactive: { tone: "critical", label: "Inactive" },
       error: { tone: "critical", label: "Error" },
       not_configured: { tone: "attention", label: "Not Configured" },
@@ -505,6 +569,21 @@ export default function OceDashboard() {
     const cfg = map[s] || { tone: "info", label: s };
     return <Badge tone={cfg.tone}>{cfg.label}</Badge>;
   };
+
+  const tabs = [
+    { id: "overview", content: "Overview", panelID: "overview-panel" },
+    { id: "orders", content: "Orders", panelID: "orders-panel" },
+    { id: "creators", content: "Creators", panelID: "creators-panel" },
+    { id: "payouts", content: "Payouts", panelID: "payouts-panel" },
+    { id: "attribution", content: "Attribution", panelID: "attribution-panel" },
+    { id: "setup", content: "Setup", panelID: "setup-panel" },
+  ];
+
+  const hasApiKey = settings.hasApiKey;
+  const summaryStats = dashboard.stats || {};
+  const recentOrders = dashboard.orders || [];
+  const creatorRows = dashboard.creators || [];
+  const payoutRows = dashboard.payouts || [];
 
   // ─── Render ──────────────────────────────────────────────────
 
@@ -519,6 +598,291 @@ export default function OceDashboard() {
       }}
     >
       <BlockStack gap="600">
+        <Card padding="0">
+          <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab} fitted />
+        </Card>
+
+        {actionData?.attributionSaved && selectedTab === 4 && (
+          <Banner tone="success" onDismiss={() => {}}>
+            Attribution settings saved successfully.
+          </Banner>
+        )}
+
+        {selectedTab === 0 && (
+          <>
+            {!hasApiKey && (
+              <Banner tone="info">
+                Add your OCE API key in the Setup tab to load live dashboard data.
+              </Banner>
+            )}
+
+            <InlineGrid columns={4} gap="400">
+              <MetricCard title="Total Exposures" value={formatInteger(summaryStats.total_exposures)} />
+              <MetricCard title="Orders" value={formatInteger(summaryStats.total_orders)} />
+              <MetricCard title="Revenue" value={formatCurrency(summaryStats.total_revenue)} />
+              <MetricCard title="Commission" value={formatCurrency(summaryStats.total_commission)} />
+            </InlineGrid>
+
+            <Layout>
+              <Layout.Section>
+                <Card>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text variant="headingMd" as="h2">Integration Health</Text>
+                      <StatusBadge status={status.overall} />
+                    </InlineStack>
+                    <InlineGrid columns={3} gap="300">
+                      <StatusCard title="SDK" status={status.sdk.status} message={status.sdk.message} />
+                      <StatusCard title="Webhook" status={status.webhook.status} message={status.webhook.message} />
+                      <StatusCard title="API" status={status.apiConnection.status} message={status.apiConnection.message} />
+                    </InlineGrid>
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+            </Layout>
+
+            <Layout>
+              <Layout.Section variant="oneHalf">
+                <Card>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text variant="headingMd" as="h2">Recent Orders</Text>
+                      <Badge>{recentOrders.length}</Badge>
+                    </InlineStack>
+                    {recentOrders.length === 0 ? (
+                      <Text variant="bodySm" tone="subdued">No orders available yet.</Text>
+                    ) : (
+                      <BlockStack gap="200">
+                        {recentOrders.slice(0, 5).map((order) => (
+                          <InlineStack key={String(order.id || order.order_id)} align="space-between" blockAlign="center">
+                            <BlockStack gap="050">
+                              <Text variant="bodyMd" fontWeight="semibold">#{order.order_id}</Text>
+                              <Text variant="bodySm" tone="subdued">{formatOrderDate(order.ts)}</Text>
+                            </BlockStack>
+                            <InlineStack gap="200" blockAlign="center">
+                              <Badge tone={order.isAttributed ? "success" : "attention"}>
+                                {order.isAttributed ? "Attributed" : "Pending"}
+                              </Badge>
+                              <Text variant="bodyMd">{formatCurrency(order.total_revenue)}</Text>
+                            </InlineStack>
+                          </InlineStack>
+                        ))}
+                      </BlockStack>
+                    )}
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+              <Layout.Section variant="oneHalf">
+                <Card>
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between" blockAlign="center">
+                      <Text variant="headingMd" as="h2">Creator Snapshot</Text>
+                      <Badge>{creatorRows.length}</Badge>
+                    </InlineStack>
+                    {creatorRows.length === 0 ? (
+                      <Text variant="bodySm" tone="subdued">No creators found for this brand yet.</Text>
+                    ) : (
+                      <BlockStack gap="200">
+                        {creatorRows.slice(0, 5).map((creator) => (
+                          <InlineStack key={String(creator.id || creator.external_id)} align="space-between" blockAlign="center">
+                            <BlockStack gap="050">
+                              <Text variant="bodyMd" fontWeight="semibold">{creator.name || creator.email || creator.external_id || "Unnamed creator"}</Text>
+                              <Text variant="bodySm" tone="subdued">{creator.email || "No email on file"}</Text>
+                            </BlockStack>
+                            <InlineStack gap="200" blockAlign="center">
+                              <Badge tone={creator.status === "active" ? "success" : "attention"}>{creator.status || "unknown"}</Badge>
+                              <Text variant="bodySm" tone="subdued">{creator.asset_count || 0} assets</Text>
+                            </InlineStack>
+                          </InlineStack>
+                        ))}
+                      </BlockStack>
+                    )}
+                  </BlockStack>
+                </Card>
+              </Layout.Section>
+            </Layout>
+          </>
+        )}
+
+        {selectedTab === 1 && (
+          <Card>
+            <BlockStack gap="300">
+              <Text variant="headingMd" as="h2">Orders</Text>
+              <IndexTable
+                resourceName={{ singular: "order", plural: "orders" }}
+                itemCount={recentOrders.length}
+                selectable={false}
+                headings={[
+                  { title: "Order" },
+                  { title: "Date" },
+                  { title: "Revenue" },
+                  { title: "Exposure IDs" },
+                  { title: "Status" },
+                ]}
+              >
+                {recentOrders.map((order, index) => (
+                  <IndexTable.Row id={String(order.id || order.order_id)} key={String(order.id || order.order_id)} position={index}>
+                    <IndexTable.Cell>
+                      <Text variant="bodyMd" fontWeight="semibold">#{order.order_id}</Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>{formatOrderDate(order.ts)}</IndexTable.Cell>
+                    <IndexTable.Cell>{formatCurrency(order.total_revenue)}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Text variant="bodySm" tone="subdued">
+                        {Array.isArray(order.exposure_ids) && order.exposure_ids.length > 0
+                          ? order.exposure_ids.join(", ")
+                          : "No exposure IDs on order"}
+                      </Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Badge tone={order.isAttributed ? "success" : "attention"}>
+                        {order.isAttributed ? "Attributed" : "Pending / fallback"}
+                      </Badge>
+                    </IndexTable.Cell>
+                  </IndexTable.Row>
+                ))}
+              </IndexTable>
+            </BlockStack>
+          </Card>
+        )}
+
+        {selectedTab === 2 && (
+          <Card>
+            <BlockStack gap="300">
+              <Text variant="headingMd" as="h2">Creators</Text>
+              <IndexTable
+                resourceName={{ singular: "creator", plural: "creators" }}
+                itemCount={creatorRows.length}
+                selectable={false}
+                headings={[
+                  { title: "Creator" },
+                  { title: "Email" },
+                  { title: "Assets" },
+                  { title: "Stripe" },
+                  { title: "Status" },
+                ]}
+              >
+                {creatorRows.map((creator, index) => (
+                  <IndexTable.Row id={String(creator.id || creator.external_id)} key={String(creator.id || creator.external_id)} position={index}>
+                    <IndexTable.Cell>
+                      <Text variant="bodyMd" fontWeight="semibold">{creator.name || creator.external_id || "Unnamed creator"}</Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>{creator.email || "—"}</IndexTable.Cell>
+                    <IndexTable.Cell>{creator.asset_count || 0}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Badge tone={creator.stripe_connected ? "success" : "attention"}>
+                        {creator.stripe_connected ? "Connected" : "Not connected"}
+                      </Badge>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Badge tone={creator.status === "active" ? "success" : "attention"}>{creator.status || "unknown"}</Badge>
+                    </IndexTable.Cell>
+                  </IndexTable.Row>
+                ))}
+              </IndexTable>
+            </BlockStack>
+          </Card>
+        )}
+
+        {selectedTab === 3 && (
+          <Card>
+            <BlockStack gap="300">
+              <InlineStack align="space-between" blockAlign="center">
+                <Text variant="headingMd" as="h2">Payouts</Text>
+                <Badge tone="info">Total {formatCurrency(dashboard.payoutTotalAmount)}</Badge>
+              </InlineStack>
+              <IndexTable
+                resourceName={{ singular: "payout", plural: "payouts" }}
+                itemCount={payoutRows.length}
+                selectable={false}
+                headings={[
+                  { title: "Creator" },
+                  { title: "Period" },
+                  { title: "Amount" },
+                  { title: "Status" },
+                  { title: "Paid at" },
+                ]}
+              >
+                {payoutRows.map((payout, index) => (
+                  <IndexTable.Row id={String(payout.id)} key={String(payout.id)} position={index}>
+                    <IndexTable.Cell>
+                      <Text variant="bodyMd" fontWeight="semibold">{payout.creator_name || payout.creator_id || "Unknown creator"}</Text>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>{payout.period || "—"}</IndexTable.Cell>
+                    <IndexTable.Cell>{formatCurrency(payout.amount)}</IndexTable.Cell>
+                    <IndexTable.Cell>
+                      <Badge tone={payout.status === "paid" ? "success" : "attention"}>{payout.status || "pending"}</Badge>
+                    </IndexTable.Cell>
+                    <IndexTable.Cell>{payout.paid_at ? formatOrderDate(payout.paid_at) : "—"}</IndexTable.Cell>
+                  </IndexTable.Row>
+                ))}
+              </IndexTable>
+            </BlockStack>
+          </Card>
+        )}
+
+        {selectedTab === 4 && (
+          <Card>
+            <BlockStack gap="400">
+              <Text variant="headingMd" as="h2">Attribution Settings</Text>
+              <InlineGrid columns={2} gap="300">
+                <Select
+                  label="Attribution model"
+                  options={[
+                    { label: "Last touch", value: "last_touch" },
+                    { label: "First touch", value: "first_touch" },
+                    { label: "Linear", value: "linear" },
+                    { label: "Time decay", value: "time_decay" },
+                  ]}
+                  value={attributionSettings.attribution_model}
+                  onChange={(value) => handleAttributionFieldChange("attribution_model", value)}
+                />
+                <TextField
+                  label="Default commission rate (%)"
+                  type="number"
+                  autoComplete="off"
+                  value={String((Number(attributionSettings.default_commission_rate) || 0) * 100)}
+                  onChange={(value) => handleAttributionFieldChange("default_commission_rate", (parseFloat(value) || 0) / 100)}
+                />
+                <TextField
+                  label="View window (days)"
+                  type="number"
+                  autoComplete="off"
+                  value={String(attributionSettings.view_window_days)}
+                  onChange={(value) => handleAttributionFieldChange("view_window_days", parseInt(value, 10) || 1)}
+                />
+                <TextField
+                  label="Click window (days)"
+                  type="number"
+                  autoComplete="off"
+                  value={String(attributionSettings.click_window_days)}
+                  onChange={(value) => handleAttributionFieldChange("click_window_days", parseInt(value, 10) || 1)}
+                />
+              </InlineGrid>
+              <BlockStack gap="200">
+                <Text variant="headingSm" as="h3">Qualifying events</Text>
+                <InlineGrid columns={2} gap="200">
+                  {["watch_start", "watch_complete", "click", "watch_25", "watch_50", "watch_75"].map((eventName) => (
+                    <Checkbox
+                      key={eventName}
+                      label={eventName}
+                      checked={attributionSettings.qualifying_events.includes(eventName)}
+                      onChange={(checked) => handleToggleQualifyingEvent(eventName, checked)}
+                    />
+                  ))}
+                </InlineGrid>
+              </BlockStack>
+              <InlineStack align="end">
+                <Button variant="primary" onClick={handleSaveAttributionSettings} loading={isLoading}>
+                  Save Attribution Settings
+                </Button>
+              </InlineStack>
+            </BlockStack>
+          </Card>
+        )}
+
+        {selectedTab === 5 && (
+          <>
         {/* ── Success/Error Banners ─────────────────────────────── */}
         {actionData?.success && (
           <Banner tone="success" onDismiss={() => {}}>
@@ -530,7 +894,6 @@ export default function OceDashboard() {
             {actionData.error}
           </Banner>
         )}
-
         {/* ── Integration Status ────────────────────────────────── */}
         <Card>
           <BlockStack gap="400">
@@ -1300,6 +1663,8 @@ export default function OceDashboard() {
             </InlineGrid>
           </BlockStack>
         </Card>
+          </>
+        )}
       </BlockStack>
     </Page>
   );
@@ -1348,4 +1713,60 @@ function FlowStep({ number, icon, title, description }) {
       </BlockStack>
     </Box>
   );
+}
+
+function MetricCard({ title, value }) {
+  return (
+    <Card>
+      <BlockStack gap="150">
+        <Text variant="bodySm" tone="subdued">{title}</Text>
+        <Text variant="headingLg" as="p">{value}</Text>
+      </BlockStack>
+    </Card>
+  );
+}
+
+function StatusCard({ title, status, message }) {
+  const tone = status === "active" || status === "connected" || status === "healthy"
+    ? "success"
+    : status === "disabled"
+    ? "attention"
+    : "critical";
+
+  return (
+    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+      <BlockStack gap="150">
+        <InlineStack align="space-between" blockAlign="center">
+          <Text variant="headingSm">{title}</Text>
+          <Badge tone={tone}>{status}</Badge>
+        </InlineStack>
+        <Text variant="bodySm" tone="subdued">{message}</Text>
+      </BlockStack>
+    </Box>
+  );
+}
+
+function formatCurrency(value) {
+  const amount = Number(value) || 0;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatInteger(value) {
+  return (Number(value) || 0).toLocaleString();
+}
+
+function formatOrderDate(value) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }

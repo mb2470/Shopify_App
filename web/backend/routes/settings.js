@@ -441,6 +441,116 @@ export async function getCreators(shop) {
 }
 
 /**
+ * GET /api/orders
+ * Fetch recent orders plus a best-effort attributed status.
+ */
+export async function getRecentOrders(shop, limit = 10) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured", orders: [] };
+  }
+
+  try {
+    const oceApi = new OceApiService(settings.apiKey);
+    const [allResult, attributedResult] = await Promise.all([
+      oceApi.manage("orders.list", { limit }),
+      oceApi.manage("orders.list", { limit, attributed_only: true }),
+    ]);
+
+    const allOrders = allResult?.data?.orders || [];
+    const attributedOrders = attributedResult?.data?.orders || [];
+    const attributedIds = new Map(
+      attributedOrders.map((order) => [String(order.id || order.order_id), order])
+    );
+
+    const orders = allOrders.map((order) => {
+      const key = String(order.id || order.order_id);
+      const attributed = attributedIds.get(key);
+      return {
+        ...order,
+        attributions: attributed?.attributions || [],
+        isAttributed: !!attributed,
+      };
+    });
+
+    return {
+      ok: true,
+      orders,
+      total: allResult?.data?.total || orders.length,
+    };
+  } catch (error) {
+    console.error("[OCE] Failed to fetch recent orders:", error.message);
+    return { ok: false, error: error.message, orders: [] };
+  }
+}
+
+/**
+ * GET /api/payouts
+ * Fetch payout ledger entries for the connected brand.
+ */
+export async function getPayouts(shop) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured", payouts: [], totalAmount: 0 };
+  }
+
+  try {
+    const oceApi = new OceApiService(settings.apiKey);
+    const result = await oceApi.manage("payouts.list", {});
+
+    return {
+      ok: true,
+      payouts: result?.data?.payouts || [],
+      totalAmount: Number(result?.data?.total_amount) || 0,
+    };
+  } catch (error) {
+    console.error("[OCE] Failed to fetch payouts:", error.message);
+    return { ok: false, error: error.message, payouts: [], totalAmount: 0 };
+  }
+}
+
+/**
+ * GET /api/attribution-settings
+ * Fetch attribution settings from the OCE management API.
+ */
+export async function getAttributionSettings(shop) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured" };
+  }
+
+  try {
+    const oceApi = new OceApiService(settings.apiKey);
+    const result = await oceApi.getSettings();
+    return {
+      ok: true,
+      settings: result?.data || result || {},
+    };
+  } catch (error) {
+    console.error("[OCE] Failed to fetch attribution settings:", error.message);
+    return { ok: false, error: error.message, settings: {} };
+  }
+}
+
+/**
+ * PUT /api/attribution-settings
+ * Update attribution settings via the OCE management API.
+ */
+export async function updateAttributionSettings(shop, updates) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  if (!settings?.apiKey) {
+    return { ok: false, error: "API key not configured" };
+  }
+
+  const oceApi = new OceApiService(settings.apiKey);
+  const result = await oceApi.manage("settings.update", updates);
+  return {
+    ok: true,
+    result: result?.data || result || {},
+  };
+}
+
+/**
  * POST /api/assets/register
  * Register one or more assets with OCE and store locally
  */
