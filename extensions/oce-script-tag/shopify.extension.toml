@@ -2,6 +2,7 @@ api_version = "2024-10"
 
 [[extensions]]
 name = "OCE Tracking SDK"
+uid = "5e3c540c-509e-1b40-2484-99c0d1f1545c45ff7da3"
 type = "theme"
 handle = "oce-tracking-sdk"
 
