@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="shopify-api-key" content="" />
-  <title>Onsite Commission Engine - Brand Dashboard</title>
+  <title>Onsite Commission Engine</title>
   <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
   <link rel="stylesheet" href="/admin-v2-assets/styles.css" />
 </head>
@@ -13,65 +13,225 @@
     <header class="header">
       <div>
         <h1>Onsite Commission Engine</h1>
-        <p>Brand dashboard (v2 migration)</p>
+        <p>Embedded Shopify dashboard for attribution operations</p>
       </div>
-      <a class="btn btn-primary" href="https://app.onsiteaffiliate.com/dashboard" target="_blank" rel="noreferrer">View OCE Dashboard</a>
+      <a class="btn btn-primary" href="https://app.onsiteaffiliate.com/dashboard" target="_blank" rel="noreferrer">Open full dashboard</a>
     </header>
 
     <div id="error-banner" class="banner banner-error hidden"></div>
     <div id="success-banner" class="banner banner-success hidden"></div>
 
-    <section class="card">
-      <div class="card-title-row">
-        <h2>Integration Status</h2>
-        <span id="overall-status" class="badge">Loading...</span>
+    <nav class="tabs" aria-label="Dashboard sections">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="orders">Orders</button>
+      <button class="tab" data-tab="creators">Creators</button>
+      <button class="tab" data-tab="payouts">Payouts</button>
+      <button class="tab" data-tab="attribution">Attribution</button>
+      <button class="tab" data-tab="setup">Setup</button>
+    </nav>
+
+    <section id="tab-overview" class="tab-panel active">
+      <div class="metric-grid">
+        <article class="metric-card">
+          <div class="metric-label">Total exposures</div>
+          <div id="metric-exposures" class="metric-value">-</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Orders</div>
+          <div id="metric-orders" class="metric-value">-</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Revenue</div>
+          <div id="metric-revenue" class="metric-value">-</div>
+        </article>
+        <article class="metric-card">
+          <div class="metric-label">Commission</div>
+          <div id="metric-commission" class="metric-value">-</div>
+        </article>
       </div>
-      <div class="status-grid">
-        <div class="status-item">
-          <h3>SDK Script</h3>
-          <p id="sdk-message">Loading...</p>
-          <span id="sdk-status" class="badge">-</span>
+
+      <section class="card">
+        <div class="card-title-row">
+          <h2>Integration Status</h2>
+          <span id="overall-status" class="badge">Loading...</span>
         </div>
-        <div class="status-item">
-          <h3>Order Webhook</h3>
-          <p id="webhook-message">Loading...</p>
-          <span id="webhook-status" class="badge">-</span>
+        <div class="status-grid">
+          <div class="status-item">
+            <h3>SDK Script</h3>
+            <p id="sdk-message">Loading...</p>
+            <span id="sdk-status" class="badge">-</span>
+          </div>
+          <div class="status-item">
+            <h3>Order Webhook</h3>
+            <p id="webhook-message">Loading...</p>
+            <span id="webhook-status" class="badge">-</span>
+          </div>
+          <div class="status-item">
+            <h3>API Connection</h3>
+            <p id="api-message">Loading...</p>
+            <span id="api-status" class="badge">-</span>
+          </div>
         </div>
-        <div class="status-item">
-          <h3>API Connection</h3>
-          <p id="api-message">Loading...</p>
-          <span id="api-status" class="badge">-</span>
-        </div>
+      </section>
+
+      <div class="split-grid">
+        <section class="card">
+          <div class="card-title-row">
+            <h2>Recent orders</h2>
+            <span id="overview-orders-count" class="pill">0</span>
+          </div>
+          <div id="overview-orders" class="stack-list empty-state">No orders yet.</div>
+        </section>
+
+        <section class="card">
+          <div class="card-title-row">
+            <h2>Creator snapshot</h2>
+            <span id="overview-creators-count" class="pill">0</span>
+          </div>
+          <div id="overview-creators" class="stack-list empty-state">No creators yet.</div>
+        </section>
       </div>
-      <div class="actions-row">
-        <button id="diagnose-webhook" class="btn">Diagnose webhook</button>
-      </div>
-      <pre id="webhook-debug" class="debug hidden"></pre>
     </section>
 
-    <section class="card">
-      <h2>Settings</h2>
-      <div class="row">
-        <label class="switch">
-          <input id="sdk-enabled" type="checkbox" />
-          <span>SDK enabled</span>
-        </label>
-        <label class="switch">
-          <input id="webhook-enabled" type="checkbox" />
-          <span>Webhook enabled</span>
-        </label>
-        <label class="switch">
-          <input id="intercept-attribution" type="checkbox" />
-          <span>Intercept checkout / Buy now</span>
-        </label>
-      </div>
-      <p class="row hint">Intercept: sync cart attribution before redirect (400ms cap). Default on; turn off if a brand objects.</p>
-      <div class="row">
-        <input id="api-key" type="password" placeholder="oce_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
-      </div>
-      <div class="actions-row">
-        <button id="save-settings" class="btn btn-primary">Save settings</button>
-      </div>
+    <section id="tab-orders" class="tab-panel">
+      <section class="card">
+        <div class="card-title-row">
+          <h2>Orders</h2>
+          <span id="orders-count" class="pill">0</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Date</th>
+                <th>Revenue</th>
+                <th>Exposure IDs</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="orders-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section id="tab-creators" class="tab-panel">
+      <section class="card">
+        <div class="card-title-row">
+          <h2>Creators</h2>
+          <span id="creators-count" class="pill">0</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Creator</th>
+                <th>Email</th>
+                <th>Assets</th>
+                <th>Stripe</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="creators-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section id="tab-payouts" class="tab-panel">
+      <section class="card">
+        <div class="card-title-row">
+          <h2>Payouts</h2>
+          <span id="payout-total" class="pill">$0.00</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Creator</th>
+                <th>Period</th>
+                <th>Amount</th>
+                <th>Status</th>
+                <th>Paid at</th>
+              </tr>
+            </thead>
+            <tbody id="payouts-table"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section id="tab-attribution" class="tab-panel">
+      <section class="card">
+        <h2>Attribution settings</h2>
+        <div class="form-grid">
+          <label class="field">
+            <span>Attribution model</span>
+            <select id="attr-model">
+              <option value="last_touch">Last touch</option>
+              <option value="first_touch">First touch</option>
+              <option value="linear">Linear</option>
+              <option value="time_decay">Time decay</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Default commission rate (%)</span>
+            <input id="attr-commission-rate" type="number" min="0" max="100" step="0.1" />
+          </label>
+          <label class="field">
+            <span>View window (days)</span>
+            <input id="attr-view-window" type="number" min="1" step="1" />
+          </label>
+          <label class="field">
+            <span>Click window (days)</span>
+            <input id="attr-click-window" type="number" min="1" step="1" />
+          </label>
+        </div>
+        <div class="field">
+          <span>Qualifying events</span>
+          <div class="checkbox-grid">
+            <label><input type="checkbox" value="watch_start" class="attr-event" /> watch_start</label>
+            <label><input type="checkbox" value="watch_complete" class="attr-event" /> watch_complete</label>
+            <label><input type="checkbox" value="click" class="attr-event" /> click</label>
+            <label><input type="checkbox" value="watch_25" class="attr-event" /> watch_25</label>
+            <label><input type="checkbox" value="watch_50" class="attr-event" /> watch_50</label>
+            <label><input type="checkbox" value="watch_75" class="attr-event" /> watch_75</label>
+          </div>
+        </div>
+        <div class="actions-row">
+          <button id="save-attribution" class="btn btn-primary">Save attribution settings</button>
+        </div>
+      </section>
+    </section>
+
+    <section id="tab-setup" class="tab-panel">
+      <section class="card">
+        <h2>Settings</h2>
+        <div class="row">
+          <label class="switch">
+            <input id="sdk-enabled" type="checkbox" />
+            <span>SDK enabled</span>
+          </label>
+          <label class="switch">
+            <input id="webhook-enabled" type="checkbox" />
+            <span>Webhook enabled</span>
+          </label>
+          <label class="switch">
+            <input id="intercept-attribution" type="checkbox" />
+            <span>Intercept checkout / Buy now</span>
+          </label>
+        </div>
+        <p class="row hint">Intercept: sync cart attribution before redirect (400ms cap). Default on; turn off if a brand objects.</p>
+        <div class="row">
+          <input id="api-key" type="password" placeholder="oce_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+        </div>
+        <div class="actions-row">
+          <button id="save-settings" class="btn btn-primary">Save settings</button>
+          <button id="diagnose-webhook" class="btn">Diagnose webhook</button>
+        </div>
+        <pre id="webhook-debug" class="debug hidden"></pre>
+      </section>
     </section>
   </main>
 

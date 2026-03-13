@@ -27,6 +27,10 @@ import {
   getAppMetafields,
   getStatsOverview,
   getCreators,
+  getRecentOrders,
+  getPayouts,
+  getAttributionSettings,
+  updateAttributionSettings,
   registerAssets,
   getRegisteredAssets,
   getDiscoveredVideos,
@@ -933,6 +937,62 @@ app.get("/api/creators", authenticate, async (req, res) => {
   } catch (err) {
     console.error("[OCE] GET /api/creators error:", err);
     res.status(500).json({ ok: false, error: err.message, creators: [] });
+  }
+});
+
+app.get("/api/orders", authenticate, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 10;
+    const result = await getRecentOrders(req.shop, limit);
+    console.log("[OCE] GET /api/orders:", JSON.stringify({
+      ok: result.ok,
+      total: result.total,
+      orders: result.orders?.length || 0,
+    }));
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] GET /api/orders error:", err);
+    res.status(500).json({ ok: false, error: err.message, orders: [] });
+  }
+});
+
+app.get("/api/payouts", authenticate, async (req, res) => {
+  try {
+    const result = await getPayouts(req.shop);
+    console.log("[OCE] GET /api/payouts:", JSON.stringify({
+      ok: result.ok,
+      payouts: result.payouts?.length || 0,
+      totalAmount: result.totalAmount || 0,
+    }));
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] GET /api/payouts error:", err);
+    res.status(500).json({ ok: false, error: err.message, payouts: [], totalAmount: 0 });
+  }
+});
+
+app.get("/api/attribution-settings", authenticate, async (req, res) => {
+  try {
+    const result = await getAttributionSettings(req.shop);
+    console.log("[OCE] GET /api/attribution-settings:", JSON.stringify({
+      ok: result.ok,
+      hasSettings: !!result.settings,
+    }));
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] GET /api/attribution-settings error:", err);
+    res.status(500).json({ ok: false, error: err.message, settings: {} });
+  }
+});
+
+app.put("/api/attribution-settings", authenticate, async (req, res) => {
+  try {
+    const result = await updateAttributionSettings(req.shop, req.body || {});
+    console.log("[OCE] PUT /api/attribution-settings:", JSON.stringify({ ok: result.ok }));
+    res.json(result);
+  } catch (err) {
+    console.error("[OCE] PUT /api/attribution-settings error:", err);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
