@@ -87,8 +87,9 @@ export async function handleOrderCreated(shop, orderData) {
   const lineItems = (orderData.line_items || []).map((item) => {
     const quantity = Number(item.quantity || 0);
     const price = Number.parseFloat(item.price || "0");
+    const fallbackSku = item.sku || (item.variant_id ? String(item.variant_id) : item.product_id ? String(item.product_id) : "unknown");
     return {
-      sku: item.sku || undefined,
+      sku: fallbackSku,
       productId: item.product_id ? String(item.product_id) : undefined,
       variantId: item.variant_id ? String(item.variant_id) : undefined,
       quantity,
