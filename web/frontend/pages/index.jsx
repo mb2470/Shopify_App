@@ -576,6 +576,7 @@ export default function OceDashboard() {
     { id: "creators", content: "Creators", panelID: "creators-panel" },
     { id: "payouts", content: "Payouts", panelID: "payouts-panel" },
     { id: "attribution", content: "Attribution", panelID: "attribution-panel" },
+    { id: "creator-portal", content: "Creator Portal", panelID: "creator-portal-panel" },
     { id: "setup", content: "Setup", panelID: "setup-panel" },
   ];
 
@@ -882,6 +883,185 @@ export default function OceDashboard() {
         )}
 
         {selectedTab === 5 && (
+          <>
+        {/* ── Creator Portal (Creator landing page) ───────────────── */}
+        <Card>
+          <BlockStack gap="400">
+            <BlockStack gap="100">
+              <Text variant="headingMd" as="h2">Creator Portal</Text>
+              <Text variant="bodySm" tone="subdued">
+                Edit the copy and content displayed on your creator signup landing page
+              </Text>
+            </BlockStack>
+            <Collapsible open={portalOpen || selectedTab === 5} id="portal-collapsible">
+              <BlockStack gap="400">
+                <Divider />
+                {portalFetcher.data?.portalSaved && (
+                  <Banner tone="success" onDismiss={() => {}}>
+                    Portal content saved successfully.
+                  </Banner>
+                )}
+
+                <Text variant="headingSm" as="h3">Page Header</Text>
+                <InlineGrid columns={2} gap="300">
+                  <TextField
+                    label="Page Title"
+                    value={portalFields.pageTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("pageTitle", v)}
+                    autoComplete="off"
+                    helpText="Use {store} for the store name"
+                  />
+                  <TextField
+                    label="Signup Card Title"
+                    value={portalFields.signupCardTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("signupCardTitle", v)}
+                    autoComplete="off"
+                  />
+                </InlineGrid>
+                <TextField
+                  label="Page Subtitle"
+                  value={portalFields.pageSubtitle || ""}
+                  onChange={(v) => handlePortalFieldChange("pageSubtitle", v)}
+                  autoComplete="off"
+                  multiline={2}
+                />
+                <TextField
+                  label="Page Subtitle (line 2)"
+                  value={portalFields.pageSubtitle2 || ""}
+                  onChange={(v) => handlePortalFieldChange("pageSubtitle2", v)}
+                  autoComplete="off"
+                  multiline={2}
+                />
+                <TextField
+                  label="Signup Card Subtitle"
+                  value={portalFields.signupCardSubtitle || ""}
+                  onChange={(v) => handlePortalFieldChange("signupCardSubtitle", v)}
+                  autoComplete="off"
+                />
+
+                <Divider />
+                <Text variant="headingSm" as="h3">Benefit Cards</Text>
+                {[1, 2, 3].map((n) => (
+                  <InlineGrid columns={2} gap="300" key={`benefit-${n}`}>
+                    <TextField
+                      label={`Benefit ${n} Title`}
+                      value={portalFields[`benefit${n}Title`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`benefit${n}Title`, v)}
+                      autoComplete="off"
+                    />
+                    <TextField
+                      label={`Benefit ${n} Description`}
+                      value={portalFields[`benefit${n}Desc`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`benefit${n}Desc`, v)}
+                      autoComplete="off"
+                    />
+                  </InlineGrid>
+                ))}
+
+                <Divider />
+                <Text variant="headingSm" as="h3">Key Terms</Text>
+                <TextField
+                  label="Terms Section Heading"
+                  value={portalFields.termsHeading || ""}
+                  onChange={(v) => handlePortalFieldChange("termsHeading", v)}
+                  autoComplete="off"
+                />
+                {[1, 2, 3, 4].map((n) => (
+                  <InlineGrid columns={{ xs: 1, md: "70px 1fr" }} gap="300" key={`term-${n}`}>
+                    <TextField
+                      label={`Icon ${n}`}
+                      value={portalFields[`term${n}Icon`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`term${n}Icon`, v)}
+                      autoComplete="off"
+                    />
+                    <TextField
+                      label={`Term ${n} Text`}
+                      value={portalFields[`term${n}Text`] || ""}
+                      onChange={(v) => handlePortalFieldChange(`term${n}Text`, v)}
+                      autoComplete="off"
+                      helpText="Use {store} for the store name"
+                    />
+                  </InlineGrid>
+                ))}
+
+                <Divider />
+                <Text variant="headingSm" as="h3">Dashboard Labels</Text>
+                <InlineGrid columns={3} gap="300">
+                  <TextField
+                    label="Dashboard Title"
+                    value={portalFields.dashboardTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("dashboardTitle", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Submit Video Title"
+                    value={portalFields.submitVideoTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("submitVideoTitle", v)}
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Your Videos Title"
+                    value={portalFields.yourVideosTitle || ""}
+                    onChange={(v) => handlePortalFieldChange("yourVideosTitle", v)}
+                    autoComplete="off"
+                  />
+                </InlineGrid>
+
+                <Divider />
+                <InlineStack gap="200">
+                  <Button
+                    variant="primary"
+                    onClick={handleSavePortalContent}
+                    loading={portalSaving}
+                  >
+                    Save Portal Content
+                  </Button>
+                  <Button
+                    onClick={handlePreviewPortal}
+                    loading={portalSaving}
+                  >
+                    Preview Portal
+                  </Button>
+                </InlineStack>
+              </BlockStack>
+            </Collapsible>
+          </BlockStack>
+        </Card>
+
+        {showPortalPreview && portalPreviewHtml && (
+          <Modal
+            open={showPortalPreview}
+            onClose={() => setShowPortalPreview(false)}
+            title="Creator Portal Preview"
+            size="large"
+          >
+            <Modal.Section>
+              <div
+                style={{
+                  border: "1px solid #e1e3e5",
+                  borderRadius: "8px",
+                  overflow: "hidden",
+                  background: "#fff",
+                }}
+              >
+                <iframe
+                  srcDoc={portalPreviewHtml}
+                  style={{
+                    width: "100%",
+                    height: "700px",
+                    border: "none",
+                  }}
+                  title="Portal Preview"
+                  sandbox="allow-scripts"
+                />
+              </div>
+            </Modal.Section>
+          </Modal>
+        )}
+          </>
+        )}
+
+        {selectedTab === 6 && (
           <>
         {/* ── Success/Error Banners ─────────────────────────────── */}
         {actionData?.success && (
@@ -1443,192 +1623,6 @@ export default function OceDashboard() {
             </Collapsible>
           </BlockStack>
         </Card>
-
-        {/* ── Creator Portal ─────────────────────────────────────── */}
-        <Card>
-          <BlockStack gap="400">
-            <InlineStack align="space-between" blockAlign="center">
-              <BlockStack gap="100">
-                <Text variant="headingMd" as="h2">Creator Portal</Text>
-                <Text variant="bodySm" tone="subdued">
-                  Edit the copy and content displayed on your creator signup portal
-                </Text>
-              </BlockStack>
-              <Button onClick={() => setPortalOpen(!portalOpen)} variant="plain">
-                {portalOpen ? "Collapse" : "Expand"}
-              </Button>
-            </InlineStack>
-            <Collapsible open={portalOpen} id="portal-collapsible">
-              <BlockStack gap="400">
-                <Divider />
-                {portalFetcher.data?.portalSaved && (
-                  <Banner tone="success" onDismiss={() => {}}>
-                    Portal content saved successfully.
-                  </Banner>
-                )}
-
-                {/* Page Header */}
-                <Text variant="headingSm" as="h3">Page Header</Text>
-                <InlineGrid columns={2} gap="300">
-                  <TextField
-                    label="Page Title"
-                    value={portalFields.pageTitle || ""}
-                    onChange={(v) => handlePortalFieldChange("pageTitle", v)}
-                    autoComplete="off"
-                    helpText="Use {store} for the store name"
-                  />
-                  <TextField
-                    label="Signup Card Title"
-                    value={portalFields.signupCardTitle || ""}
-                    onChange={(v) => handlePortalFieldChange("signupCardTitle", v)}
-                    autoComplete="off"
-                  />
-                </InlineGrid>
-                <TextField
-                  label="Page Subtitle"
-                  value={portalFields.pageSubtitle || ""}
-                  onChange={(v) => handlePortalFieldChange("pageSubtitle", v)}
-                  autoComplete="off"
-                  multiline={2}
-                />
-                <TextField
-                  label="Page Subtitle (line 2)"
-                  value={portalFields.pageSubtitle2 || ""}
-                  onChange={(v) => handlePortalFieldChange("pageSubtitle2", v)}
-                  autoComplete="off"
-                  multiline={2}
-                />
-                <TextField
-                  label="Signup Card Subtitle"
-                  value={portalFields.signupCardSubtitle || ""}
-                  onChange={(v) => handlePortalFieldChange("signupCardSubtitle", v)}
-                  autoComplete="off"
-                />
-
-                {/* Benefit Cards */}
-                <Divider />
-                <Text variant="headingSm" as="h3">Benefit Cards</Text>
-                {[1, 2, 3].map((n) => (
-                  <InlineGrid columns={2} gap="300" key={`benefit-${n}`}>
-                    <TextField
-                      label={`Benefit ${n} Title`}
-                      value={portalFields[`benefit${n}Title`] || ""}
-                      onChange={(v) => handlePortalFieldChange(`benefit${n}Title`, v)}
-                      autoComplete="off"
-                    />
-                    <TextField
-                      label={`Benefit ${n} Description`}
-                      value={portalFields[`benefit${n}Desc`] || ""}
-                      onChange={(v) => handlePortalFieldChange(`benefit${n}Desc`, v)}
-                      autoComplete="off"
-                    />
-                  </InlineGrid>
-                ))}
-
-                {/* Terms */}
-                <Divider />
-                <Text variant="headingSm" as="h3">Key Terms</Text>
-                <TextField
-                  label="Terms Section Heading"
-                  value={portalFields.termsHeading || ""}
-                  onChange={(v) => handlePortalFieldChange("termsHeading", v)}
-                  autoComplete="off"
-                />
-                {[1, 2, 3, 4].map((n) => (
-                  <InlineGrid columns={{ xs: 1, md: "70px 1fr" }} gap="300" key={`term-${n}`}>
-                    <TextField
-                      label={`Icon ${n}`}
-                      value={portalFields[`term${n}Icon`] || ""}
-                      onChange={(v) => handlePortalFieldChange(`term${n}Icon`, v)}
-                      autoComplete="off"
-                    />
-                    <TextField
-                      label={`Term ${n} Text`}
-                      value={portalFields[`term${n}Text`] || ""}
-                      onChange={(v) => handlePortalFieldChange(`term${n}Text`, v)}
-                      autoComplete="off"
-                      helpText="Use {store} for the store name"
-                    />
-                  </InlineGrid>
-                ))}
-
-                {/* Dashboard Labels */}
-                <Divider />
-                <Text variant="headingSm" as="h3">Dashboard Labels</Text>
-                <InlineGrid columns={3} gap="300">
-                  <TextField
-                    label="Dashboard Title"
-                    value={portalFields.dashboardTitle || ""}
-                    onChange={(v) => handlePortalFieldChange("dashboardTitle", v)}
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Submit Video Title"
-                    value={portalFields.submitVideoTitle || ""}
-                    onChange={(v) => handlePortalFieldChange("submitVideoTitle", v)}
-                    autoComplete="off"
-                  />
-                  <TextField
-                    label="Your Videos Title"
-                    value={portalFields.yourVideosTitle || ""}
-                    onChange={(v) => handlePortalFieldChange("yourVideosTitle", v)}
-                    autoComplete="off"
-                  />
-                </InlineGrid>
-
-                {/* Actions */}
-                <Divider />
-                <InlineStack gap="200">
-                  <Button
-                    variant="primary"
-                    onClick={handleSavePortalContent}
-                    loading={portalSaving}
-                  >
-                    Save Portal Content
-                  </Button>
-                  <Button
-                    onClick={handlePreviewPortal}
-                    loading={portalSaving}
-                  >
-                    Preview Portal
-                  </Button>
-                </InlineStack>
-              </BlockStack>
-            </Collapsible>
-          </BlockStack>
-        </Card>
-
-        {/* Portal Preview Modal */}
-        {showPortalPreview && portalPreviewHtml && (
-          <Modal
-            open={showPortalPreview}
-            onClose={() => setShowPortalPreview(false)}
-            title="Creator Portal Preview"
-            size="large"
-          >
-            <Modal.Section>
-              <div
-                style={{
-                  border: "1px solid #e1e3e5",
-                  borderRadius: "8px",
-                  overflow: "hidden",
-                  background: "#fff",
-                }}
-              >
-                <iframe
-                  srcDoc={portalPreviewHtml}
-                  style={{
-                    width: "100%",
-                    height: "700px",
-                    border: "none",
-                  }}
-                  title="Portal Preview"
-                  sandbox="allow-scripts"
-                />
-              </div>
-            </Modal.Section>
-          </Modal>
-        )}
 
         {/* ── How It Works ──────────────────────────────────────── */}
         <Card>
