@@ -25,6 +25,14 @@ export async function handleOrderCreated(shop, orderData) {
     return { status: "skipped", reason: "not_configured" };
   }
 
+  console.log("[OCE] Order forwarding auth", {
+    shop,
+    order_id: shopifyOrderId,
+    webhook_enabled: !!settings.webhookEnabled,
+    has_api_key: !!settings.apiKey,
+    api_key_prefix: settings.apiKey ? settings.apiKey.slice(0, 8) : null,
+  });
+
   // 2. Check if order already processed
   const existing = await prisma.orderSync.findUnique({
     where: { shop_shopifyOrderId: { shop, shopifyOrderId } },

@@ -58,6 +58,13 @@ export class OceApiService {
       "X-API-Key": this.apiKey,
     };
 
+    console.log("[OCE] Outbound API request", {
+      method,
+      path,
+      has_api_key: !!this.apiKey,
+      api_key_prefix: this.apiKey ? this.apiKey.slice(0, 8) : null,
+    });
+
     const options = { method, headers };
     if (body) {
       options.body = JSON.stringify(body);
