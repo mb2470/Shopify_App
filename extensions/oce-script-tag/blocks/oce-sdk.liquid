@@ -37,12 +37,40 @@
       return sessionId;
     }
 
+    function getCookie(name) {
+      try {
+        var escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        var match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'));
+        return match ? decodeURIComponent(match[1]) : null;
+      } catch (e) {}
+      return null;
+    }
+
+    function getOaId() {
+      var stored = null;
+      try {
+        stored = localStorage.getItem('_oce_oa_id') || localStorage.getItem('oce_oa_id');
+      } catch (e) {}
+      return stored || getCookie('_oa_id') || null;
+    }
+
+    function persistOaId(oaId) {
+      if (!oaId) return null;
+      try {
+        localStorage.setItem('_oce_oa_id', oaId);
+        localStorage.setItem('oce_oa_id', oaId);
+      } catch (e) {}
+      return oaId;
+    }
+
     function updateCartAttributes(exposureIds, retryCount) {
       retryCount = retryCount || 0;
+      var oaId = persistOaId(getOaId());
       var payload = {
         attributes: {
           '_oce_exposure_ids': JSON.stringify(exposureIds),
-          '_oce_session_id': getSessionId()
+          '_oce_session_id': getSessionId(),
+          '_oce_oa_id': oaId || ''
         }
       };
       var bodyStr = JSON.stringify(payload);
@@ -70,10 +98,12 @@
 
     function sendCartAttributesBeacon(exposureIds) {
       try {
+        var oaId = persistOaId(getOaId());
         var payload = {
           attributes: {
             '_oce_exposure_ids': JSON.stringify(exposureIds),
-            '_oce_session_id': getSessionId()
+            '_oce_session_id': getSessionId(),
+            '_oce_oa_id': oaId || ''
           }
         };
         var blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
@@ -96,10 +126,12 @@
 
     function minimalCartSyncOnce(exposureIds, maxMs) {
       if (!exposureIds || exposureIds.length === 0) return;
+      var oaId = persistOaId(getOaId());
       var payload = {
         attributes: {
           '_oce_exposure_ids': JSON.stringify(exposureIds),
-          '_oce_session_id': getSessionId()
+          '_oce_session_id': getSessionId(),
+          '_oce_oa_id': oaId || ''
         }
       };
       var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -179,6 +211,7 @@
       try {
         localStorage.setItem('_oce_session_id', getSessionId());
       } catch (e) {}
+      persistOaId((event.detail && event.detail.oa_id) || getOaId());
 
       updateCartAttributes(stored);
     });
@@ -256,6 +289,7 @@
         body: JSON.stringify({
           asset_id: assetId,
           session_id: getSessionId(),
+          oa_id: persistOaId(getOaId()) || undefined,
           sku: sku || undefined
         })
       })
@@ -277,7 +311,8 @@
             detail: {
               exposure_id: data.exposure_id,
               asset_id: assetId,
-              sku: sku
+              sku: sku,
+              oa_id: persistOaId(getOaId()) || undefined
             }
           }));
         } else {
@@ -388,6 +423,7 @@
         try {
           localStorage.setItem('_oce_exposure_ids', JSON.stringify(stored));
           localStorage.setItem('_oce_session_id', getSessionId());
+          persistOaId(getOaId());
         } catch (e) {}
         if (useBeacon) {
           sendCartAttributesBeacon(stored);
@@ -405,6 +441,7 @@
       setupIntercept();
 
       // Re-sync any exposures from a previous page in this session
+      persistOaId(getOaId());
       syncStoredExposuresToCart(false);
 
       // If we're on the cart page, sync immediately and again after short delays

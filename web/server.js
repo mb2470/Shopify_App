@@ -486,7 +486,7 @@ proxyRouter.post("/exposure", async (req, res) => {
     return res.status(400).json({ error: "OCE not configured" });
   }
 
-  const { asset_id, session_id, sku, creator_external_id } = req.body || {};
+  const { asset_id, session_id, oa_id, sku, creator_external_id } = req.body || {};
   if (!asset_id || !session_id) {
     return res.status(400).json({ error: "asset_id and session_id required" });
   }
@@ -496,6 +496,7 @@ proxyRouter.post("/exposure", async (req, res) => {
     const result = await oceApi.createExposure({
       assetId: asset_id,
       sessionId: session_id,
+      oaId: oa_id || undefined,
       sku: sku || undefined,
       creatorExternalId: creator_external_id || undefined,
     });

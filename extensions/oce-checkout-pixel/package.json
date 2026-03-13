@@ -1,0 +1,12 @@
+{
+  "name": "oce-checkout-pixel",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "shopify app build"
+  },
+  "dependencies": {
+    "@shopify/web-pixels-extension": "^2.18.0"
+  }
+}

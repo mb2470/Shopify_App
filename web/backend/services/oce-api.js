@@ -83,10 +83,11 @@ export class OceApiService {
    * Generate a server-side exposure ID
    * POST /exposures-create
    */
-  async createExposure({ assetId, sessionId, sku, creatorExternalId }) {
+  async createExposure({ assetId, sessionId, oaId, sku, creatorExternalId }) {
     return this.request("POST", "/exposures-create", {
       asset_id: assetId,
       session_id: sessionId,
+      oa_id: oaId,
       sku,
       creator_external_id: creatorExternalId,
     });
@@ -108,12 +109,14 @@ export class OceApiService {
    * Submit order for attribution
    * POST /orders
    */
-  async sendOrder({ orderId, ts, exposureIds, sessionId, lineItems, currency }) {
+  async sendOrder({ orderId, ts, exposureIds, sessionId, oaId, checkoutToken, lineItems, currency }) {
     return this.request("POST", "/orders", {
       order_id: orderId,
       ts,
       exposure_ids: exposureIds,
       session_id: sessionId,
+      oa_id: oaId,
+      checkout_token: checkoutToken,
       line_items: lineItems.map((item) => ({
         sku: item.sku,
         product_id: item.productId,

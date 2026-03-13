@@ -62,19 +62,24 @@ export async function handleOrderCreated(shop, orderData) {
     (a) => a.name === "_oce_session_id" || a.name === "oce_session_id"
   );
   const sessionId = sessionAttr?.value || undefined;
+  const oaAttr = (orderData.note_attributes || []).find(
+    (a) => a.name === "_oce_oa_id" || a.name === "oce_oa_id"
+  );
+  const oaId = oaAttr?.value || undefined;
+  const checkoutToken = orderData.checkout_token || undefined;
 
-  // Skip unattributed orders to avoid noisy 400s from OCE validation
-  if (!exposureIds.length && !sessionId) {
+  // Skip only when we have no way to bridge the order back to a prior exposure.
+  if (!exposureIds.length && !sessionId && !oaId && !checkoutToken) {
     await prisma.orderSync.update({
       where: { id: syncRecord.id },
       data: {
         status: "skipped",
         exposureIds: JSON.stringify([]),
-        errorMessage: "No OCE exposure/session identifiers on order",
+        errorMessage: "No OCE attribution identifiers on order",
       },
     });
 
-    console.log(`[OCE] Skipping order ${shopifyOrderId} — no exposure IDs/session ID. note_attributes sample:`, JSON.stringify(noteAttrs.slice(0, 20)));
+    console.log(`[OCE] Skipping order ${shopifyOrderId} — no exposure/session/oa/checkout identifiers. note_attributes sample:`, JSON.stringify(noteAttrs.slice(0, 20)));
     return { status: "skipped", reason: "missing_attribution_identifiers" };
   }
 
@@ -101,6 +106,8 @@ export async function handleOrderCreated(shop, orderData) {
       ts: orderData.created_at || new Date().toISOString(),
       exposureIds,
       sessionId,
+      oaId,
+      checkoutToken,
       lineItems,
       currency: orderData.currency,
     });

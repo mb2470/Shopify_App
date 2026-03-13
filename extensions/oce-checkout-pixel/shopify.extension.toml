@@ -1,0 +1,25 @@
+type = "web_pixel_extension"
+name = "OCE Checkout Pixel"
+uid = "oce-checkout-pixel-20250306"
+runtime_context = "strict"
+
+[customer_privacy]
+analytics = true
+marketing = false
+preferences = false
+sale_of_data = "disabled"
+
+[settings]
+type = "object"
+
+[settings.fields.api_key]
+name = "OCE API Key"
+description = "API key for the OCE pixel-collect endpoint (ock_...)"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "1" }]
+
+[settings.fields.pixel_endpoint]
+name = "Pixel endpoint URL"
+description = "Full URL to pixel-collect (e.g. https://xxx.supabase.co/functions/v1/pixel-collect)"
+type = "single_line_text_field"
+validations = [{ name = "min", value = "10" }]
