@@ -11,6 +11,7 @@
 import "dotenv/config";
 import express from "express";
 import crypto from "crypto";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { PrismaClient } from "@prisma/client";
@@ -55,6 +56,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const adminV2IndexPath = path.join(__dirname, "frontend", "admin-v2", "index.html");
+const adminV2Template = fs.readFileSync(adminV2IndexPath, "utf8");
 
 // ─── Middleware ────────────────────────────────────────────────────
 // Webhooks must get raw body for HMAC; do not parse JSON for /webhooks/*
@@ -1133,7 +1136,12 @@ app.get("/app", (req, res) => {
     "Content-Security-Policy",
     "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
   );
-  res.sendFile(path.join(__dirname, "frontend", "admin-v2", "index.html"));
+  res.type("html").send(
+    adminV2Template.replace(
+      '<meta name="shopify-api-key" content="" />',
+      `<meta name="shopify-api-key" content="${SHOPIFY_API_KEY}" />`
+    )
+  );
 });
 
 app.get("/", (req, res) => {
@@ -1144,7 +1152,12 @@ app.get("/", (req, res) => {
     "Content-Security-Policy",
     "frame-ancestors https://*.myshopify.com https://admin.shopify.com;"
   );
-  res.sendFile(path.join(__dirname, "frontend", "admin-v2", "index.html"));
+  res.type("html").send(
+    adminV2Template.replace(
+      '<meta name="shopify-api-key" content="" />',
+      `<meta name="shopify-api-key" content="${SHOPIFY_API_KEY}" />`
+    )
+  );
 });
 
 function getAdminHTML(shop, host) {
