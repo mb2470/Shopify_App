@@ -109,6 +109,7 @@ If you run the Onsite Affiliate backend and expose an install endpoint, set in `
 
 - **OCE_INSTALL_URL** — Full URL of the install endpoint (e.g. `https://…/functions/v1/integrations/shopify/install`).
 - **OCE_INSTALL_SECRET** — Server-to-server secret (sent as `X-API-Key` when calling the install endpoint).
+- **OCE_PUBLIC_SITE_URL** — Optional public Onsite Affiliate site URL (for example `https://app.onsiteaffiliate.com`). Used to derive `https://.../join/{brand_slug}` if the install response includes `brand_slug` but not an explicit creator portal URL.
 
 On Shopify app install (OAuth callback), the app will `POST` `{ shop }` to that URL; the backend should return `{ api_key }`. The app then stores the key and syncs it to the storefront (metafields), so the merchant does not need to paste an API key. If these env vars are not set or the request fails, the merchant can still add an API key manually in the dashboard.
 
