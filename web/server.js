@@ -176,7 +176,8 @@ app.get("/auth/callback", async (req, res) => {
 
     const settings = await prisma.oceSettings.findUnique({ where: { shop } });
     if (settings && !settings.apiKey) {
-      const tokenResult = await createTokenForShop(shop);
+      const branding = await fetchShopBranding(shop, access_token);
+      const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
         await prisma.oceSettings.update({
           where: { shop },
@@ -213,6 +214,42 @@ app.get("/api/auth/callback", (req, res) => res.redirect(`/auth/callback?${new U
 // ─── Token Exchange Helper ────────────────────────────────────────
 // Exchanges an App Bridge session token for an offline access token.
 // Used by the authenticate middleware on first contact with a shop.
+
+async function fetchShopBranding(shop, accessToken) {
+  try {
+    const response = await fetch(`https://${shop}/admin/api/2024-10/shop.json`, {
+      headers: { "X-Shopify-Access-Token": accessToken },
+    });
+    if (!response.ok) {
+      console.warn("[OCE] Failed to fetch shop branding:", response.status);
+      return {};
+    }
+
+    const data = await response.json().catch(() => ({}));
+    const shopData = data?.shop || {};
+
+    return {
+      logo_url:
+        shopData.logo_url ||
+        shopData.logo ||
+        shopData.brand?.logo?.image?.url ||
+        null,
+      primary_color:
+        shopData.primary_color ||
+        shopData.brand?.colors?.primary?.[0]?.background ||
+        shopData.brand?.colors?.primary?.background ||
+        null,
+      accent_color:
+        shopData.accent_color ||
+        shopData.brand?.colors?.secondary?.[0]?.background ||
+        shopData.brand?.colors?.secondary?.background ||
+        null,
+    };
+  } catch (error) {
+    console.warn("[OCE] Failed to fetch shop branding:", error.message);
+    return {};
+  }
+}
 
 async function doTokenExchange(shop, sessionToken) {
   console.log("[OCE] Token exchange for", shop, "client_id:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING");
@@ -277,7 +314,8 @@ async function doTokenExchange(shop, sessionToken) {
 
     const settings = await prisma.oceSettings.findUnique({ where: { shop } });
     if (settings && !settings.apiKey) {
-      const tokenResult = await createTokenForShop(shop);
+      const branding = await fetchShopBranding(shop, data.access_token);
+      const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
         await prisma.oceSettings.update({
           where: { shop },

@@ -11,7 +11,7 @@ const OCE_BASE_URL = "https://mqhtzepjrudposuedqbu.supabase.co/functions/v1";
  * Requires env OCE_INSTALL_URL and OCE_INSTALL_SECRET (server-to-server).
  * Returns { api_key } or null if not configured / request failed.
  */
-export async function createTokenForShop(shop) {
+export async function createTokenForShop(shop, branding = {}) {
   const installUrl = process.env.OCE_INSTALL_URL;
   const installSecret = process.env.OCE_INSTALL_SECRET;
   if (!installUrl || !installSecret) {
@@ -24,7 +24,7 @@ export async function createTokenForShop(shop) {
         "Content-Type": "application/json",
         "X-API-Key": installSecret,
       },
-      body: JSON.stringify({ shop }),
+      body: JSON.stringify({ shop, ...branding }),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => "");
