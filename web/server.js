@@ -225,7 +225,7 @@ async function doTokenExchange(shop, sessionToken) {
         client_secret: SHOPIFY_API_SECRET,
         grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
         subject_token: sessionToken,
-        subject_token_type: "urn:ietf:params:oauth:token-type:id-token",
+        subject_token_type: "urn:ietf:params:oauth:token-type:id_token",
         requested_token_type: "urn:shopify:params:oauth:token-type:offline-access-token",
       }),
     });
