@@ -175,7 +175,7 @@ app.get("/auth/callback", async (req, res) => {
     });
 
     const settings = await prisma.oceSettings.findUnique({ where: { shop } });
-    if (settings && !settings.apiKey) {
+    if (shouldRefreshInstallMetadata(settings)) {
       const branding = await fetchShopBranding(shop, access_token);
       const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
@@ -273,6 +273,18 @@ async function persistInstallMetadata(shop, tokenResult) {
   });
 }
 
+function shouldRefreshInstallMetadata(settings) {
+  if (!settings) return true;
+  if (!settings.apiKey) return true;
+
+  try {
+    const parsed = JSON.parse(settings.portalContent || "{}");
+    return !parsed._system_creatorPortalUrl || !parsed._system_brandSlug;
+  } catch {
+    return true;
+  }
+}
+
 async function doTokenExchange(shop, sessionToken) {
   console.log("[OCE] Token exchange for", shop, "client_id:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING");
   try {
@@ -335,7 +347,7 @@ async function doTokenExchange(shop, sessionToken) {
     }
 
     const settings = await prisma.oceSettings.findUnique({ where: { shop } });
-    if (settings && !settings.apiKey) {
+    if (shouldRefreshInstallMetadata(settings)) {
       const branding = await fetchShopBranding(shop, data.access_token);
       const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
