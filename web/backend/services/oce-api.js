@@ -35,7 +35,11 @@ export async function createTokenForShop(shop, branding = {}) {
     const apiKey = data.api_key || data.apiKey || null;
     if (apiKey) {
       console.log("[OCE] Install API returned API key for", shop);
-      return { api_key: apiKey };
+      return {
+        api_key: apiKey,
+        creator_portal_url: data.creator_portal_url || null,
+        brand_slug: data.brand_slug || null,
+      };
     }
     console.warn("[OCE] Install API response missing api_key:", Object.keys(data));
     return null;

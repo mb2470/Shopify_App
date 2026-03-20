@@ -751,6 +751,29 @@ export default function OceDashboard() {
           <Card>
             <BlockStack gap="300">
               <Text variant="headingMd" as="h2">Creators</Text>
+              {settings.creatorPortalUrl && (
+                <Card background="bg-surface-secondary">
+                  <BlockStack gap="200">
+                    <Text variant="headingSm" as="h3">Creator signup link</Text>
+                    <Text variant="bodySm" tone="subdued">
+                      Share this link with creators so they can join your portal directly.
+                    </Text>
+                    <InlineStack gap="200" align="space-between" blockAlign="center">
+                      <Text variant="bodyMd" as="p" breakWord>
+                        {settings.creatorPortalUrl}
+                      </Text>
+                      <Link url={settings.creatorPortalUrl} target="_blank" removeUnderline>
+                        Open portal
+                      </Link>
+                    </InlineStack>
+                    {settings.brandSlug && (
+                      <Text variant="bodySm" tone="subdued">
+                        Brand slug: {settings.brandSlug}
+                      </Text>
+                    )}
+                  </BlockStack>
+                </Card>
+              )}
               <IndexTable
                 resourceName={{ singular: "creator", plural: "creators" }}
                 itemCount={creatorRows.length}

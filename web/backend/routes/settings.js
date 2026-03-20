@@ -32,11 +32,23 @@ export async function getSettings(shop) {
   const maskedKey = settings.apiKey
     ? settings.apiKey.slice(0, 8) + "•".repeat(24) + settings.apiKey.slice(-4)
     : "";
+  const systemPortalData = (() => {
+    try {
+      const parsed = JSON.parse(settings.portalContent || "{}");
+      return {
+        creatorPortalUrl: parsed._system_creatorPortalUrl || "",
+        brandSlug: parsed._system_brandSlug || "",
+      };
+    } catch {
+      return { creatorPortalUrl: "", brandSlug: "" };
+    }
+  })();
 
   return {
     ...settings,
     apiKey: maskedKey,
     hasApiKey: !!settings.apiKey,
+    ...systemPortalData,
   };
 }
 

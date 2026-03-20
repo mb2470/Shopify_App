@@ -179,10 +179,7 @@ app.get("/auth/callback", async (req, res) => {
       const branding = await fetchShopBranding(shop, access_token);
       const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
-        await prisma.oceSettings.update({
-          where: { shop },
-          data: { apiKey: tokenResult.api_key },
-        });
+        await persistInstallMetadata(shop, tokenResult);
         const syncResult = await syncAppMetafields(shop, access_token);
         console.log("[OCE] Auto API key from install; metafield sync:", syncResult?.success ? "ok" : syncResult?.error);
       }
@@ -251,6 +248,31 @@ async function fetchShopBranding(shop, accessToken) {
   }
 }
 
+async function persistInstallMetadata(shop, tokenResult) {
+  const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+  const currentPortalContent = (() => {
+    try {
+      return JSON.parse(settings?.portalContent || "{}");
+    } catch {
+      return {};
+    }
+  })();
+
+  await prisma.oceSettings.update({
+    where: { shop },
+    data: {
+      apiKey: tokenResult.api_key,
+      portalContent: JSON.stringify({
+        ...currentPortalContent,
+        _system_creatorPortalUrl:
+          tokenResult.creator_portal_url || currentPortalContent._system_creatorPortalUrl || "",
+        _system_brandSlug:
+          tokenResult.brand_slug || currentPortalContent._system_brandSlug || "",
+      }),
+    },
+  });
+}
+
 async function doTokenExchange(shop, sessionToken) {
   console.log("[OCE] Token exchange for", shop, "client_id:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING");
   try {
@@ -317,10 +339,7 @@ async function doTokenExchange(shop, sessionToken) {
       const branding = await fetchShopBranding(shop, data.access_token);
       const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
-        await prisma.oceSettings.update({
-          where: { shop },
-          data: { apiKey: tokenResult.api_key },
-        });
+        await persistInstallMetadata(shop, tokenResult);
         const syncResult = await syncAppMetafields(shop, data.access_token);
         console.log("[OCE] Auto API key from token exchange; metafield sync:", syncResult?.success ? "ok" : syncResult?.error);
       }
