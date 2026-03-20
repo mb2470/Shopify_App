@@ -117,6 +117,25 @@
     </section>
 
     <section id="tab-creators" class="tab-panel">
+      <section id="creator-link-card" class="card hidden">
+        <div class="card-title-row">
+          <div>
+            <h2>Creator signup link</h2>
+            <p class="hint">Share this with creators after onboarding is healthy.</p>
+          </div>
+        </div>
+        <div id="creator-link-empty" class="empty-state">No creator portal link available yet.</div>
+        <div id="creator-link-content" class="hidden">
+          <div class="field">
+            <span>Creator portal URL</span>
+            <div class="actions-row">
+              <input id="creator-portal-url" type="text" readonly />
+              <button id="copy-creator-portal-url" class="btn">Copy</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="card">
         <div class="card-title-row">
           <h2>Creators</h2>

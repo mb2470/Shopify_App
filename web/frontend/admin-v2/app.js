@@ -31,6 +31,11 @@ const els = {
   ordersCount: document.getElementById("orders-count"),
   creatorsTable: document.getElementById("creators-table"),
   creatorsCount: document.getElementById("creators-count"),
+  creatorLinkCard: document.getElementById("creator-link-card"),
+  creatorLinkEmpty: document.getElementById("creator-link-empty"),
+  creatorLinkContent: document.getElementById("creator-link-content"),
+  creatorPortalUrl: document.getElementById("creator-portal-url"),
+  copyCreatorPortalUrl: document.getElementById("copy-creator-portal-url"),
   payoutsTable: document.getElementById("payouts-table"),
   payoutTotal: document.getElementById("payout-total"),
   attrModel: document.getElementById("attr-model"),
@@ -41,6 +46,8 @@ const els = {
   tabs: Array.from(document.querySelectorAll(".tab")),
   panels: Array.from(document.querySelectorAll(".tab-panel")),
 };
+
+let creatorLinkLoaded = false;
 
 function showBanner(kind, text) {
   const el = kind === "error" ? els.errorBanner : els.successBanner;
@@ -150,6 +157,31 @@ function setActiveTab(tabId) {
   els.panels.forEach((panel) => {
     panel.classList.toggle("active", panel.id === `tab-${tabId}`);
   });
+  if (tabId === "creators" && !creatorLinkLoaded) {
+    loadCreatorPortalLink().catch((err) => {
+      showBanner("error", err.message);
+    });
+  }
+}
+
+function renderCreatorPortalLink(result) {
+  if (!result.creatorPortalUrl) {
+    els.creatorLinkCard.classList.remove("hidden");
+    els.creatorLinkEmpty.classList.remove("hidden");
+    els.creatorLinkContent.classList.add("hidden");
+    return;
+  }
+
+  els.creatorLinkCard.classList.remove("hidden");
+  els.creatorLinkEmpty.classList.add("hidden");
+  els.creatorLinkContent.classList.remove("hidden");
+  els.creatorPortalUrl.value = result.creatorPortalUrl;
+}
+
+async function loadCreatorPortalLink() {
+  const result = await api("GET", "/api/creator-portal-link");
+  renderCreatorPortalLink(result);
+  creatorLinkLoaded = true;
 }
 
 function renderOverviewOrders(orders) {
@@ -353,6 +385,12 @@ async function saveAttributionSettings() {
 
 els.tabs.forEach((tab) => {
   tab.addEventListener("click", () => setActiveTab(tab.dataset.tab));
+});
+
+els.copyCreatorPortalUrl?.addEventListener("click", async () => {
+  if (!els.creatorPortalUrl.value) return;
+  await navigator.clipboard.writeText(els.creatorPortalUrl.value);
+  showBanner("success", "Creator signup link copied.");
 });
 
 els.diagnoseWebhook.addEventListener("click", async () => {

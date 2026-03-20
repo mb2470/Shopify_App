@@ -35,15 +35,9 @@ export async function getSettings(shop) {
   const systemPortalData = (() => {
     try {
       const parsed = JSON.parse(settings.portalContent || "{}");
-      const brandSlug = parsed._system_brandSlug || "";
-      const creatorPortalUrl =
-        parsed._system_creatorPortalUrl ||
-        (brandSlug && process.env.OCE_PUBLIC_SITE_URL
-          ? `${process.env.OCE_PUBLIC_SITE_URL.replace(/\/$/, "")}/join/${brandSlug}`
-          : "");
       return {
-        creatorPortalUrl,
-        brandSlug,
+        creatorPortalUrl: parsed._system_creatorPortalUrl || "",
+        brandSlug: parsed._system_brandSlug || "",
       };
     } catch {
       return { creatorPortalUrl: "", brandSlug: "" };
@@ -98,6 +92,26 @@ export async function updateApiKey(shop, apiKey) {
   });
 
   return { success: true, message: "API key saved successfully." };
+}
+
+export async function getCreatorPortalLink(shop) {
+  const settings = await prisma.oceSettings.findUnique({
+    where: { shop },
+    select: { portalContent: true },
+  });
+
+  try {
+    const parsed = JSON.parse(settings?.portalContent || "{}");
+    return {
+      creatorPortalUrl: parsed._system_creatorPortalUrl || "",
+      brandSlug: parsed._system_brandSlug || "",
+    };
+  } catch {
+    return {
+      creatorPortalUrl: "",
+      brandSlug: "",
+    };
+  }
 }
 
 /**

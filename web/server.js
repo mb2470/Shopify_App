@@ -19,6 +19,7 @@ import { scanThemeForVideos } from "./backend/services/theme-scanner.js";
 import { handleOrderCreated } from "./backend/routes/webhooks.js";
 import {
   getSettings,
+  getCreatorPortalLink,
   updateSettings,
   updateApiKey,
   getIntegrationStatus,
@@ -175,7 +176,7 @@ app.get("/auth/callback", async (req, res) => {
     });
 
     const settings = await prisma.oceSettings.findUnique({ where: { shop } });
-    if (shouldRefreshInstallMetadata(settings)) {
+    if (!settings?.apiKey) {
       const branding = await fetchShopBranding(shop, access_token);
       const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
@@ -273,18 +274,6 @@ async function persistInstallMetadata(shop, tokenResult) {
   });
 }
 
-function shouldRefreshInstallMetadata(settings) {
-  if (!settings) return true;
-  if (!settings.apiKey) return true;
-
-  try {
-    const parsed = JSON.parse(settings.portalContent || "{}");
-    return !parsed._system_creatorPortalUrl || !parsed._system_brandSlug;
-  } catch {
-    return true;
-  }
-}
-
 async function doTokenExchange(shop, sessionToken) {
   console.log("[OCE] Token exchange for", shop, "client_id:", SHOPIFY_API_KEY ? SHOPIFY_API_KEY.substring(0, 8) + "..." : "MISSING");
   try {
@@ -347,7 +336,7 @@ async function doTokenExchange(shop, sessionToken) {
     }
 
     const settings = await prisma.oceSettings.findUnique({ where: { shop } });
-    if (shouldRefreshInstallMetadata(settings)) {
+    if (!settings?.apiKey) {
       const branding = await fetchShopBranding(shop, data.access_token);
       const tokenResult = await createTokenForShop(shop, branding);
       if (tokenResult?.api_key) {
@@ -714,6 +703,19 @@ app.get("/api/settings", authenticate, async (req, res) => {
   } catch (err) {
     console.error("[OCE] GET /api/settings error:", err);
     res.status(500).json({ error: "Failed to load settings", detail: err.message });
+  }
+});
+
+app.get("/api/creator-portal-link", authenticate, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await getCreatorPortalLink(req.shop)) });
+  } catch (err) {
+    console.error("[OCE] GET /api/creator-portal-link error:", err);
+    res.status(500).json({
+      ok: false,
+      error: "Failed to load creator portal link",
+      detail: err.message,
+    });
   }
 });
 
