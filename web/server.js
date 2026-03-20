@@ -261,11 +261,32 @@ async function doTokenExchange(shop, sessionToken) {
       update: { accessToken: data.access_token, scope: data.scope || SCOPES },
     });
 
-    await prisma.oceSettings.upsert({
-      where: { shop },
-      create: { shop },
-      update: {},
-    });
+    try {
+      await prisma.oceSettings.upsert({
+        where: { shop },
+        create: { shop },
+        update: {},
+      });
+    } catch (settingsErr) {
+      // Multiple parallel requests can all reach token exchange on first load.
+      // If another request created the row first, continue and use that row.
+      if (settingsErr?.code !== "P2002") {
+        throw settingsErr;
+      }
+    }
+
+    const settings = await prisma.oceSettings.findUnique({ where: { shop } });
+    if (settings && !settings.apiKey) {
+      const tokenResult = await createTokenForShop(shop);
+      if (tokenResult?.api_key) {
+        await prisma.oceSettings.update({
+          where: { shop },
+          data: { apiKey: tokenResult.api_key },
+        });
+        const syncResult = await syncAppMetafields(shop, data.access_token);
+        console.log("[OCE] Auto API key from token exchange; metafield sync:", syncResult?.success ? "ok" : syncResult?.error);
+      }
+    }
 
     await registerWebhooks(shop, data.access_token);
 
