@@ -35,6 +35,10 @@ export async function createTokenForShop(shop, branding = {}) {
     const apiKey = data.api_key || data.apiKey || null;
     if (apiKey) {
       console.log("[OCE] Install API returned API key for", shop);
+      console.log("[OCE] Install API metadata for", shop, {
+        has_creator_portal_url: !!data.creator_portal_url,
+        brand_slug: data.brand_slug || null,
+      });
       return {
         api_key: apiKey,
         creator_portal_url: data.creator_portal_url || null,
