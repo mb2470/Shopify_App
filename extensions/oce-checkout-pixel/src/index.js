@@ -1,5 +1,16 @@
 import { register } from "@shopify/web-pixels-extension";
 
+function parseBooleanSetting(value, defaultValue) {
+  if (value === undefined || value === null || value === "") return defaultValue;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") return true;
+    if (normalized === "false") return false;
+  }
+  return defaultValue;
+}
+
 function deriveBridgeEndpoint(pixelEndpoint) {
   if (!pixelEndpoint) return null;
   if (pixelEndpoint.includes("/pixel-collect")) {
@@ -78,70 +89,82 @@ register(async ({ analytics, browser, settings }) => {
   const apiKey = settings?.api_key?.trim();
   const pixelEndpoint = settings?.pixel_endpoint?.trim();
   const bridgeEndpoint = deriveBridgeEndpoint(pixelEndpoint);
+  const enableCheckoutStartedBridge = parseBooleanSetting(
+    settings?.enable_checkout_started_bridge,
+    true,
+  );
+  const enableCheckoutCompletedPost = parseBooleanSetting(
+    settings?.enable_checkout_completed_post,
+    true,
+  );
   if (!apiKey || !pixelEndpoint) return;
 
-  analytics.subscribe("checkout_started", async (event) => {
-    try {
-      const checkout = event?.data?.checkout;
-      if (!checkout || !bridgeEndpoint) return;
+  if (enableCheckoutStartedBridge) {
+    analytics.subscribe("checkout_started", async (event) => {
+      try {
+        const checkout = event?.data?.checkout;
+        if (!checkout || !bridgeEndpoint) return;
 
-      const context = await buildCheckoutContext(checkout, browser);
-      if (
-        !context.checkoutToken &&
-        !context.oaId &&
-        !context.sessionId &&
-        context.exposureIds.length === 0
-      ) {
-        return;
+        const context = await buildCheckoutContext(checkout, browser);
+        if (
+          !context.checkoutToken &&
+          !context.oaId &&
+          !context.sessionId &&
+          context.exposureIds.length === 0
+        ) {
+          return;
+        }
+
+        await fetch(bridgeEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            api_key: apiKey,
+            checkout_token: context.checkoutToken,
+            currency: context.currency,
+            exposure_ids: context.exposureIds,
+            session_id: context.sessionId,
+            oa_id: context.oaId,
+            line_items: context.lineItems,
+            source: "checkout_started",
+          }),
+          keepalive: true,
+        });
+      } catch (err) {
+        console.log("checkout_started bridge error", err);
       }
+    });
+  }
 
-      await fetch(bridgeEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+  if (enableCheckoutCompletedPost) {
+    analytics.subscribe("checkout_completed", async (event) => {
+      try {
+        const checkout = event?.data?.checkout;
+        if (!checkout) return;
+        if (!checkout?.order?.id) return;
+
+        const context = await buildCheckoutContext(checkout, browser);
+        const payload = {
           api_key: apiKey,
-          checkout_token: context.checkoutToken,
+          order_id: String(checkout.order.id),
+          ts: event.timestamp || new Date().toISOString(),
           currency: context.currency,
           exposure_ids: context.exposureIds,
           session_id: context.sessionId,
           oa_id: context.oaId,
+          checkout_token: context.checkoutToken,
           line_items: context.lineItems,
-          source: "checkout_started",
-        }),
-        keepalive: true,
-      });
-    } catch (err) {
-      console.log("checkout_started bridge error", err);
-    }
-  });
+        };
 
-  analytics.subscribe("checkout_completed", async (event) => {
-    try {
-      const checkout = event?.data?.checkout;
-      if (!checkout) return;
-      if (!checkout?.order?.id) return;
-
-      const context = await buildCheckoutContext(checkout, browser);
-      const payload = {
-        api_key: apiKey,
-        order_id: String(checkout.order.id),
-        ts: event.timestamp || new Date().toISOString(),
-        currency: context.currency,
-        exposure_ids: context.exposureIds,
-        session_id: context.sessionId,
-        oa_id: context.oaId,
-        checkout_token: context.checkoutToken,
-        line_items: context.lineItems,
-      };
-
-      await fetch(pixelEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true,
-      });
-    } catch (err) {
-      console.log("checkout_completed pixel error", err);
-    }
-  });
+        await fetch(pixelEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          keepalive: true,
+        });
+      } catch (err) {
+        console.log("checkout_completed pixel error", err);
+      }
+    });
+  }
 });

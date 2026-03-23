@@ -23,3 +23,13 @@ name = "Pixel endpoint URL"
 description = "Full URL to pixel-collect (e.g. https://xxx.supabase.co/functions/v1/pixel-collect)"
 type = "single_line_text_field"
 validations = [{ name = "min", value = "10" }]
+
+[settings.fields.enable_checkout_started_bridge]
+name = "Enable checkout_started bridge"
+description = "When enabled, checkout_started stores attribution context in checkout-bridge before order creation."
+type = "boolean"
+
+[settings.fields.enable_checkout_completed_post]
+name = "Enable checkout_completed post"
+description = "When enabled, checkout_completed posts the completed order payload to pixel-collect."
+type = "boolean"
