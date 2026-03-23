@@ -1,22 +1,21 @@
-# Creator Portal Migration To OCE Plan
+# Phase 1 Creator Portal Integration Guide (Shopify App)
 
-## Goal
+## Purpose
 
-Keep Shopify App as the merchant admin surface, but move the creator-facing landing page, signup, and future creator actions onto Onsite Affiliate.
+This document explains the Phase 1 Creator Portal updates completed in Onsite Affiliate (OCE), and defines what the Shopify app must do to integrate with them.
 
-That means:
+Primary goal:
 
-- Shopify admin edits settings
-- Shopify backend saves those settings to OCE
-- creators use OCE's `/join/:brandSlug` page
-- creator signup, auth, and future actions stay in OCE as the system of record
+- Shopify app remains the merchant admin surface.
+- OCE owns the public creator join page, signup/auth, and creator lifecycle.
+- Shopify writes portal content and settings into OCE via API.
 
 ## Why This Change
 
 The current Shopify-hosted creator portal is a separate stack with separate storage and auth. That creates fragmentation across:
 
 - creator identity
-- signup / verification flow
+- signup and verification flow
 - portal content
 - future uploads and creator actions
 - future dashboards and lifecycle management
@@ -42,50 +41,206 @@ Preferred architecture:
 - [`prisma/schema.prisma`](/Users/rastakit/tga-workspace/repos/Shopify_App/prisma/schema.prisma)
   - `OceSettings.portalContent`
 
-## Migration Principle
+## What Shipped In OCE (Phase 1)
 
-Do not try to replace everything in one cut.
+Phase 1 parity work is implemented in OCE and includes:
 
-Phase 1 should move the easy content model to OCE and use OCE's live creator landing page.
-Phase 2 should add rich text parity and any remaining advanced features.
+- new `creator_portal_settings` fields for page copy, benefits, terms, toggles, and signup card content
+- expanded `creator-portal-settings` API to read and write those fields
+- updated `/join/:brandSlug` renderer to use settings-driven content
+- safe scoped `custom_css` application on the join page only
+- updated merchant settings dialog in OCE dashboard as a reference implementation
 
-## OCE Target
+Key files changed in OCE:
 
-Target OCE surface:
+- [`supabase/migrations/20260323120000_add_creator_portal_phase1_parity_fields.sql`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/supabase/migrations/20260323120000_add_creator_portal_phase1_parity_fields.sql)
+- [`supabase/functions/creator-portal-settings/index.ts`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/supabase/functions/creator-portal-settings/index.ts)
+- [`src/pages/creator/CreatorSignup.tsx`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/src/pages/creator/CreatorSignup.tsx)
+- [`src/components/legal/TermsSummaryCard.tsx`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/src/components/legal/TermsSummaryCard.tsx)
+- [`src/components/dashboard/BrandPortalSettingsDialog.tsx`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/src/components/dashboard/BrandPortalSettingsDialog.tsx)
+- [`src/integrations/supabase/types.ts`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/src/integrations/supabase/types.ts)
 
-- landing page: `/join/:brandSlug`
-- settings endpoint: [`/Users/rastakit/tga-workspace/repos/onsite-affiliate/supabase/functions/creator-portal-settings/index.ts`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/supabase/functions/creator-portal-settings/index.ts)
-- OCE parity plan: [`/Users/rastakit/tga-workspace/repos/onsite-affiliate/docs/CREATOR_PORTAL_PARITY_PLAN.md`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/docs/CREATOR_PORTAL_PARITY_PLAN.md)
+## OCE Data Model: Phase 1 Fields
 
-The Shopify App should call that endpoint through server-side code using the backend management key.
+The following fields were added to `creator_portal_settings`.
 
-## Phase 1: Migrate The Easy Fields
+### Page header content
 
-### Fields to move to OCE now
+- `page_title`
+- `page_subtitle`
+- `page_subtitle_2`
 
-These fields are good low-hanging-fruit candidates for near parity:
+### Benefits section
 
-- page title
-- page subtitle
-- page subtitle line 2
-- 3 benefit card titles/descriptions
-- show/hide benefits
-- terms heading
-- 4 term icons/text rows
-- show/hide terms
-- signup card title
-- signup card subtitle
-- logo/colors
-- custom CSS
+- `benefit_1_title`
+- `benefit_1_description`
+- `benefit_2_title`
+- `benefit_2_description`
+- `benefit_3_title`
+- `benefit_3_description`
+- `show_benefits`
 
-### Shopify app changes in phase 1
+### Terms summary section
 
-#### 1. Add backend OCE proxy methods
+- `terms_heading`
+- `term_1_icon`
+- `term_1_text`
+- `term_2_icon`
+- `term_2_text`
+- `term_3_icon`
+- `term_3_text`
+- `term_4_icon`
+- `term_4_text`
+- `show_terms`
+
+### Signup card content
+
+- `signup_card_title`
+- `signup_card_subtitle`
+
+Existing fields still supported:
+
+- `logo_url`
+- `primary_color`
+- `accent_color`
+- `headline`
+- `description`
+- `cta_text`
+- `custom_css`
+
+## OCE API Contract: `creator-portal-settings`
+
+Endpoint:
+
+- Supabase edge function `creator-portal-settings`
+- implementation: [`supabase/functions/creator-portal-settings/index.ts`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/supabase/functions/creator-portal-settings/index.ts)
+
+### Public read (GET)
+
+Request:
+
+- `GET /functions/v1/creator-portal-settings?brand_slug={brandSlug}`
+
+Behavior:
+
+- returns brand plus portal settings
+- includes the new Phase 1 fields
+- if no dedicated settings row exists, the function falls back to brand metadata and returns `null` for unset portal fields
+
+### Authenticated write (POST)
+
+Request body:
+
+```json
+{
+  "brand_slug": "your-brand-slug",
+  "settings": {
+    "page_title": "Join BrandX as a Creator",
+    "page_subtitle": "Create content and earn commissions",
+    "show_benefits": true
+  }
+}
+```
+
+Requirements:
+
+- API key with `manage.brands`
+- `brand_slug`, if provided, must match the API key brand
+- only whitelisted fields are saved
+
+Write behavior:
+
+- upserts by `brand_id`
+- returns saved settings including the new Phase 1 fields
+
+## Rendering Behavior On OCE Join Page
+
+Public page path:
+
+- `/join/:brandSlug`
+
+Implementation target:
+
+- [`src/pages/creator/CreatorSignup.tsx`](/Users/rastakit/tga-workspace/repos/onsite-affiliate/src/pages/creator/CreatorSignup.tsx)
+
+### Header content
+
+Title render precedence:
+
+1. `page_title`
+2. `headline`
+3. default `Join {Brand} as a Creator`
+
+Subtitle render precedence:
+
+1. `page_subtitle`
+2. `description`
+3. default marketing copy
+
+`page_subtitle_2` is optional and renders as a second subtitle line only when populated.
+
+### Benefits section
+
+- controlled by `show_benefits`
+- hidden only when explicitly `false`
+- uses the 3 title and description pairs from settings
+- falls back to default benefit copy for missing values
+
+### Terms summary section
+
+- controlled by `show_terms`
+- hidden only when explicitly `false`
+- heading from `terms_heading`
+- 4 configurable rows using `term_n_text` and `term_n_icon`
+- unknown or missing icons fall back safely to a default icon
+
+Supported icon keywords currently map to lucide icons:
+
+- `file`, `filetext`, `terms`
+- `dollar`, `dollarsign`, `money`
+- `eye`, `view`
+- `clock`, `time`
+
+### Signup card
+
+- title from `signup_card_title`
+- fallback `Create Your Account`
+- subtitle from `signup_card_subtitle`
+- fallback `Start earning with {Brand} in minutes`
+- CTA still uses `cta_text`
+
+### Custom CSS
+
+- `custom_css` is injected only on the join page surface
+- CSS is scoped under `#creator-signup-page` for normal selectors
+- intended for styling tweaks only in Phase 1, not rich HTML injection
+
+## Shopify App: Required Changes
+
+This is the implementation checklist for the Shopify app repository.
+
+### 1. Extend Shopify portal settings schema and types
+
+Wherever Shopify App stores editor state, add the full Phase 1 field set listed above.
+
+Guidelines:
+
+- booleans default to `true` for `show_benefits` and `show_terms`
+- text fields default to empty string in UI state
+- preserve `headline` and `description` for compatibility and fallback behavior
+
+Likely files:
+
+- [`prisma/schema.prisma`](/Users/rastakit/tga-workspace/repos/Shopify_App/prisma/schema.prisma)
+- [`web/frontend/pages/index.jsx`](/Users/rastakit/tga-workspace/repos/Shopify_App/web/frontend/pages/index.jsx)
+- [`web/backend/routes/settings.js`](/Users/rastakit/tga-workspace/repos/Shopify_App/web/backend/routes/settings.js)
+
+### 2. Add backend OCE proxy methods
 
 In Shopify backend code, add helpers like:
 
-- `getCreatorLandingPageSettings(shop)`
-- `saveCreatorLandingPageSettings(shop, settings)`
+- `getCreatorPortalSettings(shop)`
+- `saveCreatorPortalSettings(shop, settings)`
 
 These should:
 
@@ -97,9 +252,11 @@ Likely file:
 
 - [`web/backend/services/oce-api.js`](/Users/rastakit/tga-workspace/repos/Shopify_App/web/backend/services/oce-api.js)
 
-#### 2. Add Shopify admin routes/actions for OCE-backed settings
+This depends on the dual-key work documented in [`docs/DUAL_API_KEY_MIGRATION_PLAN.md`](/Users/rastakit/tga-workspace/repos/Shopify_App/docs/DUAL_API_KEY_MIGRATION_PLAN.md), because the write path must use the server-side `backendApiKey` with `manage.brands`.
 
-Expose internal app endpoints or Remix actions that:
+### 3. Update Shopify admin routes and actions
+
+Expose internal app endpoints or actions that:
 
 - load current OCE landing-page settings
 - save edited settings to OCE
@@ -109,88 +266,130 @@ Likely files:
 - [`web/backend/routes/settings.js`](/Users/rastakit/tga-workspace/repos/Shopify_App/web/backend/routes/settings.js)
 - [`web/frontend/pages/index.jsx`](/Users/rastakit/tga-workspace/repos/Shopify_App/web/frontend/pages/index.jsx)
 
-#### 3. Add a separate OCE-backed editor section
+### 4. Update Shopify editor UI
 
-Do not immediately overwrite the current local portal editor.
+Add editor controls for:
 
-Instead:
+- page title, subtitle, and subtitle line 2
+- benefits toggle plus 3 title and description cards
+- terms toggle, heading, and 4 icon and text rows
+- signup card title and subtitle
+- existing style controls plus `custom_css`
 
-- add a new "Creator Landing Page (OCE)" section in Shopify admin
-- wire only the phase 1 fields to OCE
-- preview the real OCE creator portal using `creatorPortalUrl`
+Recommended editor grouping:
 
-Why separate first:
+- Header
+- Benefits
+- Terms Summary
+- Signup Card
+- Theme and CSS
 
-- the current local editor is already in use
-- the old local portal and the new OCE portal are different render targets
-- keeping them separate reduces confusion during migration
+### 5. Update Shopify to OCE save payload
 
-#### 4. Push merchants toward the OCE page
+When a merchant clicks save or publish, include all supported Phase 1 fields in the `settings` payload sent to OCE.
 
-In admin UI and setup flow:
+Important:
 
-- emphasize the OCE `creatorPortalUrl`
-- treat the Shopify-hosted creator portal as legacy
+- send booleans as JSON booleans, not strings
+- do not send unsupported keys
+- use `backendApiKey`, never a browser key
 
-## Phase 2: Rich Text And Advanced Parity
+### 6. Treat the OCE page as the source of truth
 
-### Rich text subtitles
+If Shopify App keeps a local preview renderer, it should match OCE behavior as closely as possible:
 
-The current Shopify editor supports limited rich text in subtitle fields.
+- same fallback rules
+- same section toggle logic
+- same terms icon keyword behavior, or clearly document any mismatch
 
-This should stay phase 2 because it needs:
+Preferred pattern:
 
-- allowed-tag definition
-- sanitization rules
-- safe rendering in OCE React
+- use OCE `/join/:brandSlug` as the authoritative renderer
+- treat local preview as helper UX only
 
-Until then:
+### 7. Keep the Shopify-hosted creator portal as legacy during migration
 
-- phase 1 subtitle fields should be plain-text only, or
-- Shopify should down-convert existing rich text to plain text for the OCE-backed editor
+Do not immediately overwrite the current local portal editor or renderer.
 
-### Any remaining advanced presentation features
+Recommended rollout:
 
-If any old local editor behaviors remain unmatched after phase 1, carry them into phase 2 rather than blocking the migration.
+1. add a separate OCE-backed "Creator Landing Page" section in Shopify admin
+2. wire Phase 1 fields to OCE
+3. preview or open the live `creatorPortalUrl`
+4. keep the Shopify-hosted creator portal available during migration
+5. stop enhancing the Shopify-hosted portal once the OCE-backed flow is in use
 
-## Legacy Portal Strategy
+Why keep it separate first:
 
-The current Shopify-hosted creator portal should be treated as legacy after the OCE-backed editor is live.
+- the local Shopify editor may still have merchant data in `portalContent`
+- the old Shopify portal and OCE `/join/:brandSlug` are different render targets
+- separation reduces source-of-truth confusion while merchants migrate
 
-Recommended path:
+### 8. Update Shopify-side migration and backfill logic if needed
 
-1. Keep it available during migration.
-2. Move merchant setup and preview toward OCE `/join/:brandSlug`.
-3. Stop enhancing the local Shopify-hosted portal.
-4. Decommission or hide it once OCE parity is sufficient.
+If Shopify App persists portal settings in its own DB or cache:
 
-## Dependencies
+- add fields for the new values
+- backfill `show_benefits` and `show_terms` to `true`
+- leave text fields null or empty unless a merchant edits them
 
-This migration assumes:
+### 9. QA the end-to-end flow
 
-- OCE expands `creator-portal-settings` to support the phase 1 field set
-- the Shopify backend key has `manage.brands`
-- the dual-key flow is in place so the management-capable key stays server-side
+From Shopify admin:
 
-## Suggested Implementation Order
+1. save every new field
+2. verify OCE GET returns saved values
+3. verify OCE `/join/:brandSlug` reflects all changes
+4. toggle off `show_benefits` and `show_terms`
+5. verify signup card title and subtitle updates
+6. verify scoped `custom_css` works and does not bleed outside the join page
 
-1. Complete phase 1 field expansion in OCE.
-2. Add Shopify backend proxy methods for OCE landing-page settings.
-3. Add OCE-backed landing-page editor in Shopify admin.
-4. Add preview/open flow for the live OCE creator portal URL.
-5. Mark the old Shopify-hosted creator portal as legacy in merchant-facing UX.
-6. Implement phase 2 rich text parity later.
+## Suggested Shopify Payload Example
 
-## Verification Checklist
+```json
+{
+  "brand_slug": "brand-slug",
+  "settings": {
+    "logo_url": "https://cdn.example.com/logo.png",
+    "primary_color": "#111111",
+    "accent_color": "#D72638",
+    "headline": "Legacy headline fallback",
+    "description": "Legacy description fallback",
+    "cta_text": "Apply Now",
+    "custom_css": ".text-muted-foreground { opacity: 0.92; }",
+    "page_title": "Join BrandX Creator Program",
+    "page_subtitle": "Create videos, share products, and earn commissions.",
+    "page_subtitle_2": "Fast setup. Transparent payouts.",
+    "benefit_1_title": "Upload Your Content",
+    "benefit_1_description": "Submit videos and track every conversion.",
+    "benefit_2_title": "Real-Time Analytics",
+    "benefit_2_description": "See attribution and revenue performance instantly.",
+    "benefit_3_title": "Earn Commissions",
+    "benefit_3_description": "Get paid for every sale you influence.",
+    "show_benefits": true,
+    "terms_heading": "Program Terms at a Glance",
+    "term_1_icon": "file",
+    "term_1_text": "You retain ownership of your content.",
+    "term_2_icon": "dollar",
+    "term_2_text": "Commission rates are set by each brand.",
+    "term_3_icon": "eye",
+    "term_3_text": "Placements are not guaranteed.",
+    "term_4_icon": "clock",
+    "term_4_text": "Removed content is taken down within 30 days.",
+    "show_terms": true,
+    "signup_card_title": "Create Your Creator Account",
+    "signup_card_subtitle": "Start earning with BrandX in minutes."
+  }
+}
+```
 
-- Shopify admin can load OCE landing-page settings
-- Shopify admin can save OCE landing-page settings
-- saves update the live OCE `/join/:brandSlug` page
-- no browser code receives the `backendApiKey`
-- creator signup occurs in OCE, not Shopify App local auth
-- legacy local portal remains available during migration
-- rich text remains explicitly out of scope until phase 2
+## Compatibility Notes
+
+- OCE still supports `headline` and `description` and uses them as fallback
+- if Shopify starts sending `page_title` and `page_subtitle`, those take precedence
+- merchants can adopt the new fields gradually without breaking the join page
+- rich-text subtitle support is still Phase 2 work and should not block this migration
 
 ## Status
 
-Planning only. No runtime changes have been made by this document.
+Planning only on the Shopify App side. Phase 1 OCE support is available; Shopify App integration work remains to be implemented.
